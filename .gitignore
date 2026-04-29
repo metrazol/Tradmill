@@ -1,0 +1,9 @@
+# Ignore everything
+*
+
+# Allow project files
+!.gitignore
+!main.py
+!treadmill.py
+!display.py
+!config.py
