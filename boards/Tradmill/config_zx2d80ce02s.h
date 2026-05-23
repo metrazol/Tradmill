@@ -50,8 +50,8 @@
 #define PWM_FREQ_HZ      20       // Hz — MC2100 expects 20 Hz
 #define PWM_RESOLUTION   13       // bits → duty range 0–8191
 #define MAX_DUTY_PCT      0.55f   // 55% duty = full speed on MC2100
-#define MAX_SPEED_MPH    12.0f
-#define SPEED_STEP_MPH    0.5f   // belt speed change per encoder tick
+#define MAX_SPEED_MPH     6.0f   // calibrated: 55% duty reaches 6 mph on this build
+#define SPEED_STEP_MPH    0.25f  // belt speed change per encoder tick / touch button
 
 // ---- Incline ----
 #define MAX_INCLINE_LEVEL   15

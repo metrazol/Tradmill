@@ -37,6 +37,10 @@ static void onSpeedAdjust(int32_t delta) {
     treadmill.adjustSpeed(delta);
 }
 
+static void onStopButton() {
+    treadmill.toggleRunning();
+}
+
 // ---- Setup -----------------------------------------------------------------
 
 void setup() {
@@ -55,6 +59,7 @@ void setup() {
     // and builds all on-screen widgets.  Must come after treadmill.begin().
     ui_init();
     ui_set_speed_callback(onSpeedAdjust);
+    ui_set_stop_callback(onStopButton);
 
     Serial.println("Tradmill ready.");
 }
@@ -99,7 +104,8 @@ void loop() {
             treadmill.getSpeedMph(),
             treadmill.getInclineLevel(),
             treadmill.getElapsedSeconds(),
-            treadmill.isSafetyTriggered()
+            treadmill.isSafetyTriggered(),
+            treadmill.isRunning()
         );
         lastDisplayUpdate = now;
     }
