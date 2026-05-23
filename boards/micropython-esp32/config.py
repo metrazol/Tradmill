@@ -26,3 +26,11 @@ INCLINE_BTN_ACTIVE_LOW = True  # True = buttons pull LOW when pressed (INPUT_PUL
 
 # Display refresh
 DISPLAY_UPDATE_MS = 250
+
+# Rotary encoder
+ENCODER_CLK = 32
+ENCODER_DT = 33
+ENCODER_SW = 35   # click button — active-low with internal pull-up
+
+# Debug serial output
+DEBUG = True

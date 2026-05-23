@@ -12,12 +12,15 @@ class TreadmillDisplay:
         self.oled.fill(0)
         self.oled.show()
 
-    def update(self, speed_mph, incline_level, elapsed_seconds, safety=False):
+    def update(self, speed_mph, incline_level, elapsed_seconds, safety=False, running=True):
         self.oled.fill(0)
 
         if safety:
             self.oled.text("!! STOPPED !!", 10, 24)
             self.oled.text("Set speed to 0", 4, 40)
+        elif not running:
+            self.oled.text("-- PAUSED --", 16, 24)
+            self.oled.text("Click to start", 4, 40)
         else:
             mins = int(elapsed_seconds) // 60
             secs = int(elapsed_seconds) % 60

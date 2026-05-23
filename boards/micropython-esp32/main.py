@@ -1,6 +1,6 @@
 import time
 from treadmill import Treadmill
-from config import I2C_SDA, I2C_SCL, DISPLAY_UPDATE_MS
+from config import I2C_SDA, I2C_SCL, DISPLAY_UPDATE_MS, DEBUG
 
 
 def main():
@@ -26,8 +26,17 @@ def main():
                     treadmill.incline_level,
                     treadmill.elapsed_seconds,
                     treadmill.safety_triggered,
+                    treadmill.running,
                 )
                 last_display_ms = now
+
+        if DEBUG:
+            print("spd:{:.1f}mph inc:{} t:{}s safety:{}".format(
+                treadmill.speed_mph,
+                treadmill.incline_level,
+                treadmill.elapsed_seconds,
+                treadmill.safety_triggered,
+            ))
 
         time.sleep_ms(5)
 

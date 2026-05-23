@@ -1,9 +1,18 @@
-# Ignore everything
-*
+# MicroPython firmware binaries
+*.bin
 
-# Allow project files
-!.gitignore
-!main.py
-!treadmill.py
-!display.py
-!config.py
+# MicroPython bytecode cache
+__pycache__/
+*.pyc
+
+# Arduino build artefacts
+build/
+*.elf
+*.hex
+*.map
+
+# IDE files
+.vscode/
+.idea/
+*.suo
+*.user

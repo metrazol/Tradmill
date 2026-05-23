@@ -6,11 +6,13 @@ from config import (
     SAFETY_KEY_PIN, PWM_FREQ, MAX_DUTY_CYCLE,
     SPEED_ANALOG_THRESHOLD, MAX_SPEED_MPH,
     MAX_INCLINE_LEVEL, MIN_INCLINE_LEVEL, INCLINE_BTN_ACTIVE_LOW,
+    ENCODER_SW,
 )
 
 _MAX_ADC = 4095   # ESP32 12-bit ADC
 _MAX_DUTY = 1023  # MicroPython PWM duty range
 _INCLINE_DEBOUNCE_MS = 300
+_SW_DEBOUNCE_MS = 50
 
 
 class Treadmill:
@@ -27,15 +29,19 @@ class Treadmill:
         self.btn_down = Pin(INCLINE_DOWN_BTN, Pin.IN, pull)
 
         self.safety_key = Pin(SAFETY_KEY_PIN, Pin.IN) if SAFETY_KEY_PIN is not None else None
+        self.encoder_sw = Pin(ENCODER_SW, Pin.IN, Pin.PULL_UP)
 
         self.safety_triggered = False
         self.incline_level = 0
         self.speed_mph = 0.0
         self.elapsed_seconds = 0
+        self.running = False
 
         self._last_btn_up = False
         self._last_btn_down = False
         self._last_incline_ms = 0
+        self._last_sw = False
+        self._last_sw_ms = 0
         self._session_start = None
 
     def update(self):
@@ -45,12 +51,19 @@ class Treadmill:
         if safety_active and not self.safety_triggered:
             self._stop_all()
             self.safety_triggered = True
+            self.running = False
             return
 
         if self.safety_triggered:
             self._stop_all()
             if pot_value < SPEED_ANALOG_THRESHOLD:
                 self.safety_triggered = False
+            return
+
+        self._check_encoder_click()
+
+        if not self.running:
+            self._stop_all()
             return
 
         self._update_incline()
@@ -61,6 +74,14 @@ class Treadmill:
 
         if self._session_start is not None:
             self.elapsed_seconds = time.time() - self._session_start
+
+    def _check_encoder_click(self):
+        now = time.ticks_ms()
+        pressed = self.encoder_sw.value() == 0  # active-low
+        if pressed and not self._last_sw and time.ticks_diff(now, self._last_sw_ms) > _SW_DEBOUNCE_MS:
+            self.running = not self.running
+            self._last_sw_ms = now
+        self._last_sw = pressed
 
     def _btn_pressed(self, pin):
         return pin.value() == 0 if INCLINE_BTN_ACTIVE_LOW else pin.value() == 1
