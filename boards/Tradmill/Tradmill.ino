@@ -10,6 +10,7 @@
 #include "config.h"
 #include "treadmill.h"
 #include "ui.h"
+#include "connectivity.h"
 
 // ---- Rotary encoder ISR ----------------------------------------------------
 // Quadrature decoding via 4-bit state table.  Runs on both CLK and DT edges.
@@ -54,6 +55,7 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(ENCODER_DT),  encoderISR, CHANGE);
 
     treadmill.begin();
+    connectivity_init();
 
     // ui_init() initialises the display hardware, registers the LVGL driver,
     // and builds all on-screen widgets.  Must come after treadmill.begin().
@@ -98,6 +100,12 @@ void loop() {
     }
 
     treadmill.update();
+
+    connectivity_update(
+        treadmill.getSpeedMph(),
+        treadmill.getElapsedSeconds(),
+        treadmill.isRunning()
+    );
 
     if (now - lastDisplayUpdate >= DISPLAY_UPDATE_MS) {
         ui_update(

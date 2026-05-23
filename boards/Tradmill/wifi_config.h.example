@@ -1,0 +1,34 @@
+#pragma once
+// ============================================================
+// WiFi and Home Assistant configuration
+//
+// Copy this file to wifi_config.h and fill in your values.
+// wifi_config.h is gitignored so credentials never land in
+// the repository.
+//
+// The sketch compiles and runs without wifi_config.h — it
+// simply skips all connectivity features.
+// ============================================================
+
+// ---- WiFi ---------------------------------------------------
+#define WIFI_SSID      "your-network-name"
+#define WIFI_PASSWORD  "your-wifi-password"
+
+// ---- ArduinoOTA ---------------------------------------------
+// The hostname appears in Arduino IDE → Tools → Port (network)
+#define OTA_HOSTNAME   "tradmill"
+// Uncomment to require a password for OTA uploads:
+// #define OTA_PASSWORD "your-ota-password"
+
+// ---- Home Assistant webhook ---------------------------------
+// 1. In HA: Settings → Automations → New Automation
+// 2. Add Trigger → Webhook → give it a Webhook ID, e.g. "tradmill"
+// 3. Paste the full URL shown by HA below.
+//
+// Payload sent every 5 s (JSON):
+//   { "speed_mph": 3.50, "elapsed_sec": 142, "running": true }
+//
+// Use trigger.json.speed_mph etc. in your HA automation actions.
+// To expose as sensors, fire input_number.set_value or use a
+// trigger-based template sensor (HA 2023.8+).
+#define HA_WEBHOOK_URL "http://192.168.1.x:8123/api/webhook/tradmill"
