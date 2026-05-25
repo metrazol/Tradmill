@@ -56,11 +56,7 @@ static lv_color_t speed_colour(float mph) {
 // ---- Public interface -------------------------------------------------------
 
 void ui_set_speed_callback(void (*cb)(int32_t delta)) {
-    (void)cb;  // no touch screen on this board
-}
-
-void ui_set_stop_callback(void (*cb)()) {
-    (void)cb;  // no touch screen on this board
+    (void)cb;  // no touch screen — speed is encoder-only on this board
 }
 
 void ui_init() {
@@ -141,23 +137,11 @@ void ui_init() {
     lv_obj_add_flag(_lbl_safety, LV_OBJ_FLAG_HIDDEN);
 }
 
-void ui_update(float speed_mph, int incline, uint32_t elapsed_sec,
-               bool safety, bool running) {
+void ui_update(float speed_mph, int incline, uint32_t elapsed_sec, bool safety) {
     if (safety) {
         lv_obj_add_flag(_arc,          LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(_lbl_speed,    LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(_lbl_unit,     LV_OBJ_FLAG_HIDDEN);
-        lv_label_set_text(_lbl_safety, "!! STOPPED !!\nSet speed to 0");
-        lv_obj_clear_flag(_lbl_safety, LV_OBJ_FLAG_HIDDEN);
-        return;
-    }
-
-    if (!running) {
-        lv_obj_add_flag(_arc,          LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(_lbl_speed,    LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(_lbl_unit,     LV_OBJ_FLAG_HIDDEN);
-        lv_label_set_text(_lbl_safety, "-- PAUSED --\nClick to start");
-        lv_obj_set_style_text_color(_lbl_safety, lv_color_hex(0xAAAAAA), 0);
         lv_obj_clear_flag(_lbl_safety, LV_OBJ_FLAG_HIDDEN);
         return;
     }
@@ -166,7 +150,6 @@ void ui_update(float speed_mph, int incline, uint32_t elapsed_sec,
     lv_obj_clear_flag(_lbl_speed,   LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(_lbl_unit,    LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(_lbl_safety,    LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_style_text_color(_lbl_safety, lv_color_hex(0xFF4444), 0);  // reset for next safety event
 
     lv_arc_set_value(_arc, (int16_t)(speed_mph * 10));
     lv_obj_set_style_arc_color(_arc, speed_colour(speed_mph), LV_PART_INDICATOR);

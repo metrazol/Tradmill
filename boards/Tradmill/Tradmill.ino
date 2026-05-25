@@ -5,12 +5,13 @@
 // in config.h, ui_gc9a01.cpp, and ui_zx2d80ce02s.cpp.
 // ============================================================
 
+#define FIRMWARE_VERSION "1.0.5"
+
 #include <Arduino.h>
 #include <lvgl.h>
 #include "config.h"
 #include "treadmill.h"
 #include "ui.h"
-#include "connectivity.h"
 
 // ---- Rotary encoder ISR ----------------------------------------------------
 // Quadrature decoding via 4-bit state table.  Runs on both CLK and DT edges.
@@ -38,10 +39,6 @@ static void onSpeedAdjust(int32_t delta) {
     treadmill.adjustSpeed(delta);
 }
 
-static void onStopButton() {
-    treadmill.toggleRunning();
-}
-
 // ---- Setup -----------------------------------------------------------------
 
 void setup() {
@@ -55,15 +52,13 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(ENCODER_DT),  encoderISR, CHANGE);
 
     treadmill.begin();
-    connectivity_init();
 
     // ui_init() initialises the display hardware, registers the LVGL driver,
     // and builds all on-screen widgets.  Must come after treadmill.begin().
     ui_init();
     ui_set_speed_callback(onSpeedAdjust);
-    ui_set_stop_callback(onStopButton);
 
-    Serial.println("Tradmill ready.");
+    Serial.printf("Tradmill v" FIRMWARE_VERSION " ready.\n");
 }
 
 // ---- Loop ------------------------------------------------------------------
@@ -101,19 +96,12 @@ void loop() {
 
     treadmill.update();
 
-    connectivity_update(
-        treadmill.getSpeedMph(),
-        treadmill.getElapsedSeconds(),
-        treadmill.isRunning()
-    );
-
     if (now - lastDisplayUpdate >= DISPLAY_UPDATE_MS) {
         ui_update(
             treadmill.getSpeedMph(),
             treadmill.getInclineLevel(),
             treadmill.getElapsedSeconds(),
-            treadmill.isSafetyTriggered(),
-            treadmill.isRunning()
+            treadmill.isSafetyTriggered()
         );
         lastDisplayUpdate = now;
     }

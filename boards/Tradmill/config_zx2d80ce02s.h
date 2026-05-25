@@ -60,4 +60,4 @@
 
 // ---- Application ----
 #define DISPLAY_UPDATE_MS  250
-#define DEBUG              true
+#define DEBUG              false

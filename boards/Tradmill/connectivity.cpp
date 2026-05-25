@@ -56,7 +56,9 @@ static void post_to_ha(float speed_mph, uint32_t elapsed_sec, bool running) {
     WiFiClient  client;
     HTTPClient  http;
 
+    client.setTimeout(1);  // TCP connect timeout: 1 s
     if (!http.begin(client, HA_WEBHOOK_URL)) return;
+    http.setTimeout(1000);  // HTTP response timeout: 1 s
     http.addHeader("Content-Type", "application/json");
 
     char body[96];
