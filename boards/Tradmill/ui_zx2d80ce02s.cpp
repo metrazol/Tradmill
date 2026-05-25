@@ -108,20 +108,23 @@ static void touch_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
 static lv_obj_t *_arc;
 static lv_obj_t *_lbl_speed;
 static lv_obj_t *_lbl_unit;
-static lv_obj_t *_lbl_incline;
 static lv_obj_t *_lbl_time;
 static lv_obj_t *_btn_minus;
 static lv_obj_t *_btn_plus;
+static lv_obj_t *_btn_stop;
+static lv_obj_t *_lbl_stop;
 static lv_obj_t *_lbl_safety;
 
-// Arc spans 240° centred at the bottom: 150° → 30° (clockwise)
+// Arc spans 240° centred at the bottom: 150° → 30° (clockwise).
+// ARC_MAX derived from MAX_SPEED_MPH so it scales with calibration changes.
 #define ARC_START  150
 #define ARC_END     30
-#define ARC_MAX    120   // represents 12.0 mph (value = mph * 10)
+#define ARC_MAX    ((int16_t)(MAX_SPEED_MPH * 10.0f))
 
 static void (*_speed_cb)(int32_t delta) = nullptr;
+static void (*_stop_cb)()               = nullptr;
 
-// ---- Speed button callback --------------------------------------------------
+// ---- Button callbacks -------------------------------------------------------
 
 static void btn_speed_cb(lv_event_t *e) {
     if (_speed_cb) {
@@ -130,12 +133,18 @@ static void btn_speed_cb(lv_event_t *e) {
     }
 }
 
+static void btn_stop_cb(lv_event_t *e) {
+    if (_stop_cb) _stop_cb();
+}
+
+// ---- Widget factory helpers -------------------------------------------------
+
 static lv_obj_t *make_speed_btn(lv_obj_t *scr, const char *label,
                                  lv_align_t align, int32_t x_ofs,
                                  int32_t delta) {
     lv_obj_t *btn = lv_btn_create(scr);
-    lv_obj_set_size(btn, 100, 50);
-    lv_obj_align(btn, align, x_ofs, -8);
+    lv_obj_set_size(btn, 100, 44);
+    lv_obj_align(btn, align, x_ofs, -10);
     lv_obj_set_style_bg_color(btn, lv_color_hex(0x1E6FCC), 0);
     lv_obj_set_style_bg_color(btn, lv_color_hex(0x0A4A99), LV_STATE_PRESSED);
     lv_obj_set_style_radius(btn, 10, 0);
@@ -164,12 +173,14 @@ void ui_set_speed_callback(void (*cb)(int32_t delta)) {
     _speed_cb = cb;
 }
 
+void ui_set_stop_callback(void (*cb)()) {
+    _stop_cb = cb;
+}
+
 void ui_init() {
-    // Init display via LovyanGFX
     _gfx.init();
     _gfx.fillScreen(TFT_BLACK);
 
-    // Init LVGL and register display driver
     lv_init();
     lv_disp_draw_buf_init(&_draw_buf, _buf1, _buf2, SCREEN_W * 10);
 
@@ -181,21 +192,19 @@ void ui_init() {
     disp_drv.draw_buf = &_draw_buf;
     lv_disp_drv_register(&disp_drv);
 
-    // Register touch input device
     static lv_indev_drv_t indev_drv;
     lv_indev_drv_init(&indev_drv);
     indev_drv.type    = LV_INDEV_TYPE_POINTER;
     indev_drv.read_cb = touch_read;
     lv_indev_drv_register(&indev_drv);
 
-    // Build widgets
     lv_obj_t *scr = lv_scr_act();
     lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
 
-    // Speed arc (centred in the upper portion of the 240x320 screen)
+    // Speed arc pushed toward the top so the three button rows fit below it
     _arc = lv_arc_create(scr);
     lv_obj_set_size(_arc, 210, 210);
-    lv_obj_align(_arc, LV_ALIGN_CENTER, 0, -30);
+    lv_obj_align(_arc, LV_ALIGN_CENTER, 0, -50);
     lv_arc_set_range(_arc, 0, ARC_MAX);
     lv_arc_set_bg_angles(_arc, ARC_START, ARC_END);
     lv_arc_set_value(_arc, 0);
@@ -206,12 +215,11 @@ void ui_init() {
     lv_obj_set_style_arc_color(_arc, lv_color_hex(0x333333), LV_PART_MAIN);
     lv_obj_set_style_arc_color(_arc, lv_color_hex(0x00C8FF), LV_PART_INDICATOR);
 
-    // Large speed value in the centre of the arc
     _lbl_speed = lv_label_create(scr);
     lv_obj_set_style_text_font(_lbl_speed, &lv_font_montserrat_48, 0);
     lv_obj_set_style_text_color(_lbl_speed, lv_color_white(), 0);
     lv_label_set_text(_lbl_speed, "0.0");
-    lv_obj_align(_lbl_speed, LV_ALIGN_CENTER, 0, -50);
+    lv_obj_align(_lbl_speed, LV_ALIGN_CENTER, 0, -70);
 
     _lbl_unit = lv_label_create(scr);
     lv_obj_set_style_text_font(_lbl_unit, &lv_font_montserrat_20, 0);
@@ -219,23 +227,30 @@ void ui_init() {
     lv_label_set_text(_lbl_unit, "mph");
     lv_obj_align_to(_lbl_unit, _lbl_speed, LV_ALIGN_OUT_BOTTOM_MID, 0, 4);
 
-    // Incline level at the top of the screen
-    _lbl_incline = lv_label_create(scr);
-    lv_obj_set_style_text_font(_lbl_incline, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_color(_lbl_incline, lv_color_hex(0xFFCC00), 0);
-    lv_label_set_text(_lbl_incline, "Incline: 0");
-    lv_obj_align(_lbl_incline, LV_ALIGN_TOP_MID, 0, 10);
-
-    // Elapsed time between arc and touch buttons
+    // Elapsed time just below the arc
     _lbl_time = lv_label_create(scr);
     lv_obj_set_style_text_font(_lbl_time, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(_lbl_time, lv_color_hex(0xAAAAAA), 0);
     lv_label_set_text(_lbl_time, "00:00");
-    lv_obj_align(_lbl_time, LV_ALIGN_BOTTOM_MID, 0, -68);
+    lv_obj_align(_lbl_time, LV_ALIGN_BOTTOM_MID, 0, -118);
 
-    // Touch speed buttons at the bottom
-    _btn_minus = make_speed_btn(scr, "-  Slow",  LV_ALIGN_BOTTOM_LEFT,   10, -1);
-    _btn_plus  = make_speed_btn(scr, "Fast  +",  LV_ALIGN_BOTTOM_RIGHT, -10,  1);
+    // Stop / start toggle button (centre row)
+    _btn_stop = lv_btn_create(scr);
+    lv_obj_set_size(_btn_stop, 120, 44);
+    lv_obj_align(_btn_stop, LV_ALIGN_BOTTOM_MID, 0, -62);
+    lv_obj_set_style_bg_color(_btn_stop, lv_color_hex(0xAA2222), 0);
+    lv_obj_set_style_bg_color(_btn_stop, lv_color_hex(0x881111), LV_STATE_PRESSED);
+    lv_obj_set_style_radius(_btn_stop, 10, 0);
+    lv_obj_add_event_cb(_btn_stop, btn_stop_cb, LV_EVENT_CLICKED, nullptr);
+
+    _lbl_stop = lv_label_create(_btn_stop);
+    lv_obj_set_style_text_font(_lbl_stop, &lv_font_montserrat_20, 0);
+    lv_label_set_text(_lbl_stop, "Start");
+    lv_obj_center(_lbl_stop);
+
+    // Speed ± buttons (bottom row)
+    _btn_minus = make_speed_btn(scr, "- Slow",  LV_ALIGN_BOTTOM_LEFT,   10, -1);
+    _btn_plus  = make_speed_btn(scr, "Fast +",  LV_ALIGN_BOTTOM_RIGHT, -10,  1);
 
     // Safety overlay (hidden until a safety event)
     _lbl_safety = lv_label_create(scr);
@@ -247,11 +262,15 @@ void ui_init() {
     lv_obj_add_flag(_lbl_safety, LV_OBJ_FLAG_HIDDEN);
 }
 
-void ui_update(float speed_mph, int incline, uint32_t elapsed_sec, bool safety) {
+void ui_update(float speed_mph, int incline, uint32_t elapsed_sec,
+               bool safety, bool running) {
+    (void)incline;
+
     if (safety) {
         lv_obj_add_flag(_arc,          LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(_lbl_speed,    LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(_lbl_unit,     LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(_btn_stop,     LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(_btn_minus,    LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(_btn_plus,     LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(_lbl_safety, LV_OBJ_FLAG_HIDDEN);
@@ -261,9 +280,18 @@ void ui_update(float speed_mph, int incline, uint32_t elapsed_sec, bool safety) 
     lv_obj_clear_flag(_arc,         LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(_lbl_speed,   LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(_lbl_unit,    LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(_btn_stop,    LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(_btn_minus,   LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(_btn_plus,    LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(_lbl_safety,    LV_OBJ_FLAG_HIDDEN);
+
+    if (running) {
+        lv_label_set_text(_lbl_stop, "Stop");
+        lv_obj_set_style_bg_color(_btn_stop, lv_color_hex(0xAA2222), 0);
+    } else {
+        lv_label_set_text(_lbl_stop, "Start");
+        lv_obj_set_style_bg_color(_btn_stop, lv_color_hex(0x226622), 0);
+    }
 
     lv_arc_set_value(_arc, (int16_t)(speed_mph * 10));
     lv_obj_set_style_arc_color(_arc, speed_colour(speed_mph), LV_PART_INDICATOR);
@@ -271,9 +299,6 @@ void ui_update(float speed_mph, int incline, uint32_t elapsed_sec, bool safety) 
     char buf[16];
     snprintf(buf, sizeof(buf), "%.1f", speed_mph);
     lv_label_set_text(_lbl_speed, buf);
-
-    snprintf(buf, sizeof(buf), "Incline: %d", incline);
-    lv_label_set_text(_lbl_incline, buf);
 
     snprintf(buf, sizeof(buf), "%02u:%02u",
              (unsigned)(elapsed_sec / 60), (unsigned)(elapsed_sec % 60));

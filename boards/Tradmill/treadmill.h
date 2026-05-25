@@ -13,7 +13,7 @@ public:
     // immediately but the target speed is preserved for when it resumes.
     void toggleRunning();
 
-    float    getSpeedMph()       const { return _speedMph; }
+    float    getSpeedMph()       const { return _targetSpeedMph; }
     int      getInclineLevel()   const { return _inclineLevel; }
     uint32_t getElapsedSeconds() const { return _elapsedSeconds; }
     bool     isSafetyTriggered() const { return _safetyTriggered; }

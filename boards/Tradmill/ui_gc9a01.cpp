@@ -59,6 +59,10 @@ void ui_set_speed_callback(void (*cb)(int32_t delta)) {
     (void)cb;  // no touch screen — speed is encoder-only on this board
 }
 
+void ui_set_stop_callback(void (*cb)()) {
+    (void)cb;  // no touch screen on this board
+}
+
 void ui_init() {
     // Power on display
     pinMode(LCD_EN_PIN, OUTPUT); digitalWrite(LCD_EN_PIN, HIGH);
@@ -137,7 +141,9 @@ void ui_init() {
     lv_obj_add_flag(_lbl_safety, LV_OBJ_FLAG_HIDDEN);
 }
 
-void ui_update(float speed_mph, int incline, uint32_t elapsed_sec, bool safety) {
+void ui_update(float speed_mph, int incline, uint32_t elapsed_sec,
+               bool safety, bool running) {
+    (void)running;
     if (safety) {
         lv_obj_add_flag(_arc,          LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(_lbl_speed,    LV_OBJ_FLAG_HIDDEN);

@@ -5,7 +5,7 @@
 // in config.h, ui_gc9a01.cpp, and ui_zx2d80ce02s.cpp.
 // ============================================================
 
-#define FIRMWARE_VERSION "1.0.5"
+#define FIRMWARE_VERSION "1.0.6"
 
 #include <Arduino.h>
 #include <lvgl.h>
@@ -39,6 +39,10 @@ static void onSpeedAdjust(int32_t delta) {
     treadmill.adjustSpeed(delta);
 }
 
+static void onStopButton() {
+    treadmill.toggleRunning();
+}
+
 // ---- Setup -----------------------------------------------------------------
 
 void setup() {
@@ -57,6 +61,7 @@ void setup() {
     // and builds all on-screen widgets.  Must come after treadmill.begin().
     ui_init();
     ui_set_speed_callback(onSpeedAdjust);
+    ui_set_stop_callback(onStopButton);
 
     Serial.printf("Tradmill v" FIRMWARE_VERSION " ready.\n");
 }
@@ -101,7 +106,8 @@ void loop() {
             treadmill.getSpeedMph(),
             treadmill.getInclineLevel(),
             treadmill.getElapsedSeconds(),
-            treadmill.isSafetyTriggered()
+            treadmill.isSafetyTriggered(),
+            treadmill.isRunning()
         );
         lastDisplayUpdate = now;
     }
