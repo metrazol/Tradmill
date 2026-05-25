@@ -21,19 +21,27 @@ void Treadmill::begin() {
 }
 
 void Treadmill::adjustSpeed(int32_t ticks) {
+    if (_stopping) return;
     _targetSpeedMph += ticks * SPEED_STEP_MPH;
     _targetSpeedMph = constrain(_targetSpeedMph, 0.0f, MAX_SPEED_MPH);
 }
 
 void Treadmill::toggleRunning() {
-    _running = !_running;
-    if (!_running) {
-        // Pause: kill the motor now but keep _targetSpeedMph so the belt
-        // resumes at the same speed when the user clicks start again.
-        ledcWrite(SPEED_PIN, 0);
-        digitalWrite(INCLINE_UP_PIN,   LOW);
-        digitalWrite(INCLINE_DOWN_PIN, LOW);
-        _speedMph = 0.0f;
+    if (_stopping) {
+        // Cancel the ramp; resume at whatever speed we've ramped down to.
+        _stopping = false;
+    } else if (_running) {
+        if (_targetSpeedMph < 0.01f) {
+            // Already at zero — stop immediately.
+            ledcWrite(SPEED_PIN, 0);
+            _running = false;
+        } else {
+            _stopping        = true;
+            _stopRampFrom    = _targetSpeedMph;
+            _stopRampStartMs = millis();
+        }
+    } else {
+        _running = true;
     }
 }
 
@@ -43,7 +51,8 @@ void Treadmill::update() {
     if (safetyActive && !_safetyTriggered) {
         _stopAll();
         _safetyTriggered = true;
-        _running = false;
+        _running  = false;
+        _stopping = false;
         return;
     }
 
@@ -56,6 +65,22 @@ void Treadmill::update() {
     }
 
     if (!_running) {
+        return;
+    }
+
+    if (_stopping) {
+        uint32_t elapsed = millis() - _stopRampStartMs;
+        if (elapsed >= 3000) {
+            _stopAll();
+            _running  = false;
+            _stopping = false;
+        } else {
+            _targetSpeedMph = _stopRampFrom * (1.0f - (float)elapsed / 3000.0f);
+            _applySpeed();
+            if (_sessionRunning) {
+                _elapsedSeconds = (millis() - _sessionStartMs) / 1000;
+            }
+        }
         return;
     }
 

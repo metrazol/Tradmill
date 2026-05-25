@@ -30,6 +30,10 @@ private:
     uint32_t _sessionStartMs  = 0;
     bool     _sessionRunning  = false;
 
+    bool     _stopping        = false;
+    uint32_t _stopRampStartMs = 0;
+    float    _stopRampFrom    = 0.0f;
+
     bool     _lastBtnUp       = false;
     bool     _lastBtnDown     = false;
     uint32_t _lastInclineMs   = 0;
