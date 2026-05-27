@@ -188,9 +188,13 @@ void ui_set_stop_callback(void (*cb)()) {
 }
 
 void ui_init() {
+    Serial.printf("PSRAM: %s  size=%u\n",
+        psramFound() ? "found" : "NOT FOUND", ESP.getPsramSize());
+    Serial.println("ui: gfx.init...");
     _gfx.init();
+    Serial.println("ui: fillScreen...");
     _gfx.fillScreen(TFT_BLACK);
-
+    Serial.println("ui: lv_init...");
     lv_init();
     lv_disp_draw_buf_init(&_draw_buf, _buf1, _buf2, SCREEN_W * 10);
 
