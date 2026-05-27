@@ -12,8 +12,8 @@ void Treadmill::begin() {
     pinMode(INCLINE_UP_PIN,   OUTPUT); digitalWrite(INCLINE_UP_PIN,   LOW);
     pinMode(INCLINE_DOWN_PIN, OUTPUT); digitalWrite(INCLINE_DOWN_PIN, LOW);
 
-    pinMode(INCLINE_UP_BTN,   INPUT_PULLUP);
-    pinMode(INCLINE_DOWN_BTN, INPUT_PULLUP);
+    if (INCLINE_UP_BTN   != -1) pinMode(INCLINE_UP_BTN,   INPUT_PULLUP);
+    if (INCLINE_DOWN_BTN != -1) pinMode(INCLINE_DOWN_BTN, INPUT_PULLUP);
 
     if (SAFETY_KEY_PIN != -1) {
         pinMode(SAFETY_KEY_PIN, INPUT);
@@ -110,8 +110,8 @@ void Treadmill::_updateIncline() {
     uint32_t now    = millis();
     bool debounceOk = (now - _lastInclineMs) > INCLINE_DEBOUNCE_MS;
 
-    bool up   = (digitalRead(INCLINE_UP_BTN)   == LOW);
-    bool down = (digitalRead(INCLINE_DOWN_BTN)  == LOW);
+    bool up   = (INCLINE_UP_BTN   != -1) && (digitalRead(INCLINE_UP_BTN)   == LOW);
+    bool down = (INCLINE_DOWN_BTN != -1) && (digitalRead(INCLINE_DOWN_BTN) == LOW);
 
     if (up && !down) {
         digitalWrite(INCLINE_UP_PIN,   HIGH);
