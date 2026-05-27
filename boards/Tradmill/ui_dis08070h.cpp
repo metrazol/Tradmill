@@ -8,6 +8,9 @@
 #include <Arduino.h>
 #include <lvgl.h>
 #include <LovyanGFX.hpp>
+// Panel_RGB and Bus_RGB are platform-specific and not auto-included by LovyanGFX.hpp
+#include <lgfx/v1/platforms/esp32s3/Bus_RGB.hpp>
+#include <lgfx/v1/platforms/esp32s3/Panel_RGB.hpp>
 #include "config.h"
 #include "ui.h"
 
@@ -27,22 +30,23 @@ public:
             cfg.pin_vsync         = SCREEN_VSYNC;
             cfg.pin_pclk          = SCREEN_PCLK;
             cfg.pin_henable       = SCREEN_DE;
+            cfg.panel             = &_panel;  // Bus_RGB requires back-pointer to panel
             cfg.hsync_front_porch = 10;
             cfg.hsync_pulse_width =  8;
             cfg.hsync_back_porch  = 50;
             cfg.vsync_front_porch = 10;
             cfg.vsync_pulse_width =  8;
             cfg.vsync_back_porch  = 20;
-            // BGR565 bit order: B[0-4], G[0-5], R[0-4]
-            cfg.pin_d[0]  = SCREEN_B0; cfg.pin_d[1]  = SCREEN_B1;
-            cfg.pin_d[2]  = SCREEN_B2; cfg.pin_d[3]  = SCREEN_B3;
-            cfg.pin_d[4]  = SCREEN_B4;
-            cfg.pin_d[5]  = SCREEN_G0; cfg.pin_d[6]  = SCREEN_G1;
-            cfg.pin_d[7]  = SCREEN_G2; cfg.pin_d[8]  = SCREEN_G3;
-            cfg.pin_d[9]  = SCREEN_G4; cfg.pin_d[10] = SCREEN_G5;
-            cfg.pin_d[11] = SCREEN_R0; cfg.pin_d[12] = SCREEN_R1;
-            cfg.pin_d[13] = SCREEN_R2; cfg.pin_d[14] = SCREEN_R3;
-            cfg.pin_d[15] = SCREEN_R4;
+            // pin_data[]: B[0-4], G[0-5], R[0-4]
+            cfg.pin_data[0]  = SCREEN_B0; cfg.pin_data[1]  = SCREEN_B1;
+            cfg.pin_data[2]  = SCREEN_B2; cfg.pin_data[3]  = SCREEN_B3;
+            cfg.pin_data[4]  = SCREEN_B4;
+            cfg.pin_data[5]  = SCREEN_G0; cfg.pin_data[6]  = SCREEN_G1;
+            cfg.pin_data[7]  = SCREEN_G2; cfg.pin_data[8]  = SCREEN_G3;
+            cfg.pin_data[9]  = SCREEN_G4; cfg.pin_data[10] = SCREEN_G5;
+            cfg.pin_data[11] = SCREEN_R0; cfg.pin_data[12] = SCREEN_R1;
+            cfg.pin_data[13] = SCREEN_R2; cfg.pin_data[14] = SCREEN_R3;
+            cfg.pin_data[15] = SCREEN_R4;
             _bus.config(cfg);
             _panel.setBus(&_bus);
         }

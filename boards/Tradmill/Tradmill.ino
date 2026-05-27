@@ -5,7 +5,7 @@
 // in config.h, ui_gc9a01.cpp, and ui_zx2d80ce02s.cpp.
 // ============================================================
 
-#define FIRMWARE_VERSION "1.0.8"
+#define FIRMWARE_VERSION "1.0.9"
 
 #include <Arduino.h>
 #include <lvgl.h>
