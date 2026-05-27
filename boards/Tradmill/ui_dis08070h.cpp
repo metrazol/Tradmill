@@ -11,8 +11,11 @@
 // Panel_RGB and Bus_RGB are platform-specific and not auto-included by LovyanGFX.hpp
 #include <lgfx/v1/platforms/esp32s3/Bus_RGB.hpp>
 #include <lgfx/v1/platforms/esp32s3/Panel_RGB.hpp>
+#include "esp_log.h"
 #include "config.h"
 #include "ui.h"
+
+static const char *TAG_UI = "ui_dis";
 
 // ---- LovyanGFX board configuration -----------------------------------------
 
@@ -86,7 +89,8 @@ public:
     }
 };
 
-static LGFX_DIS08070H _gfx;
+// Constructed in ui_init() so Panel_RGB's LCD_CAM interrupt runs after setup().
+static LGFX_DIS08070H *_gfx = nullptr;
 
 // ---- LVGL glue --------------------------------------------------------------
 
@@ -97,16 +101,16 @@ static lv_color_t _buf2[SCREEN_W * 10];
 static void disp_flush(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *colors) {
     uint32_t w = area->x2 - area->x1 + 1;
     uint32_t h = area->y2 - area->y1 + 1;
-    _gfx.startWrite();
-    _gfx.setAddrWindow(area->x1, area->y1, w, h);
-    _gfx.writePixels((lgfx::rgb565_t *)colors, w * h);
-    _gfx.endWrite();
+    _gfx->startWrite();
+    _gfx->setAddrWindow(area->x1, area->y1, w, h);
+    _gfx->writePixels((lgfx::rgb565_t *)colors, w * h);
+    _gfx->endWrite();
     lv_disp_flush_ready(drv);
 }
 
 static void touch_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
     uint16_t x, y;
-    if (_gfx.getTouch(&x, &y)) {
+    if (_gfx->getTouch(&x, &y)) {
         data->point.x = x;
         data->point.y = y;
         data->state   = LV_INDEV_STATE_PR;
@@ -188,13 +192,21 @@ void ui_set_stop_callback(void (*cb)()) {
 }
 
 void ui_init() {
-    Serial.printf("PSRAM: %s  size=%u\n",
-        psramFound() ? "found" : "NOT FOUND", ESP.getPsramSize());
-    Serial.println("ui: gfx.init...");
-    _gfx.init();
-    Serial.println("ui: fillScreen...");
-    _gfx.fillScreen(TFT_BLACK);
-    Serial.println("ui: lv_init...");
+    ESP_LOGI(TAG_UI, "PSRAM=%s size=%u heap=%u",
+        psramFound() ? "found" : "MISSING",
+        (unsigned)ESP.getPsramSize(), (unsigned)ESP.getFreeHeap());
+    ESP_LOGI(TAG_UI, "new LGFX...");
+    _gfx = new LGFX_DIS08070H();
+    ESP_LOGI(TAG_UI, "gfx.init...");
+    if (!_gfx->init()) {
+        ESP_LOGE(TAG_UI, "gfx.init FAILED — check USB Mode (LCD_CAM interrupt conflict)");
+        return;
+    }
+    ESP_LOGI(TAG_UI, "display OK — flashing red then black");
+    _gfx->fillScreen(TFT_RED);   // visible for 2 s → confirms display hardware works
+    delay(2000);
+    _gfx->fillScreen(TFT_BLACK);
+    ESP_LOGI(TAG_UI, "lv_init...");
     lv_init();
     lv_disp_draw_buf_init(&_draw_buf, _buf1, _buf2, SCREEN_W * 10);
 
@@ -280,6 +292,7 @@ void ui_init() {
 
 void ui_update(float speed_mph, int incline, uint32_t elapsed_sec,
                bool safety, bool running) {
+    if (!_arc) return;  // init failed — no widgets to update
     (void)incline;
 
     if (safety) {

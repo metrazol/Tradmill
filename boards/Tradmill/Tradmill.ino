@@ -5,13 +5,16 @@
 // in config.h, ui_gc9a01.cpp, and ui_zx2d80ce02s.cpp.
 // ============================================================
 
-#define FIRMWARE_VERSION "1.0.10"
+#define FIRMWARE_VERSION "1.0.14"
 
 #include <Arduino.h>
 #include <lvgl.h>
+#include "esp_log.h"
 #include "config.h"
 #include "treadmill.h"
 #include "ui.h"
+
+static const char *TAG = "Tradmill";
 
 // ---- Rotary encoder ISR ----------------------------------------------------
 // Quadrature decoding via 4-bit state table.  Runs on both CLK and DT edges.
@@ -47,6 +50,9 @@ static void onStopButton() {
 
 void setup() {
     Serial.begin(115200);
+    ESP_LOGI(TAG, "setup start  PSRAM=%s size=%u heap=%u",
+        psramFound() ? "found" : "MISSING",
+        (unsigned)ESP.getPsramSize(), (unsigned)ESP.getFreeHeap());
 
     pinMode(ENCODER_CLK, INPUT_PULLUP);
     pinMode(ENCODER_DT,  INPUT_PULLUP);
@@ -56,14 +62,16 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(ENCODER_DT),  encoderISR, CHANGE);
 
     treadmill.begin();
+    ESP_LOGI(TAG, "treadmill OK");
 
     // ui_init() initialises the display hardware, registers the LVGL driver,
     // and builds all on-screen widgets.  Must come after treadmill.begin().
     ui_init();
+    ESP_LOGI(TAG, "ui_init OK");
     ui_set_speed_callback(onSpeedAdjust);
     ui_set_stop_callback(onStopButton);
 
-    Serial.printf("Tradmill v" FIRMWARE_VERSION " ready.\n");
+    ESP_LOGI(TAG, "Tradmill v" FIRMWARE_VERSION " ready");
 }
 
 // ---- Loop ------------------------------------------------------------------
