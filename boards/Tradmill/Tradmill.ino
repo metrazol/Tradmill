@@ -5,7 +5,7 @@
 // in config.h, ui_gc9a01.cpp, and ui_zx2d80ce02s.cpp.
 // ============================================================
 
-#define FIRMWARE_VERSION "1.0.14"
+#define FIRMWARE_VERSION "1.0.16"
 
 #include <Arduino.h>
 #include <lvgl.h>
@@ -50,6 +50,8 @@ static void onStopButton() {
 
 void setup() {
     Serial.begin(115200);
+    delay(2000);                 // Give the Serial Monitor time to connect!
+    Serial.setDebugOutput(true); // Force ESP_LOG messages to show up over USB
     ESP_LOGI(TAG, "setup start  PSRAM=%s size=%u heap=%u",
         psramFound() ? "found" : "MISSING",
         (unsigned)ESP.getPsramSize(), (unsigned)ESP.getFreeHeap());
@@ -58,18 +60,20 @@ void setup() {
     pinMode(ENCODER_DT,  INPUT_PULLUP);
     pinMode(ENCODER_SW,  INPUT_PULLUP);
     lastEncoded = (digitalRead(ENCODER_CLK) << 1) | digitalRead(ENCODER_DT);
-    attachInterrupt(digitalPinToInterrupt(ENCODER_CLK), encoderISR, CHANGE);
-    attachInterrupt(digitalPinToInterrupt(ENCODER_DT),  encoderISR, CHANGE);
-
-    treadmill.begin();
-    ESP_LOGI(TAG, "treadmill OK");
-
-    // ui_init() initialises the display hardware, registers the LVGL driver,
-    // and builds all on-screen widgets.  Must come after treadmill.begin().
+    
+    // 1. INITIALIZE DISPLAY FIRST so it gets the LCD_CAM interrupts
     ui_init();
     ESP_LOGI(TAG, "ui_init OK");
     ui_set_speed_callback(onSpeedAdjust);
     ui_set_stop_callback(onStopButton);
+
+    // 2. INITIALIZE TREADMILL (PWM/LEDC) SECOND
+    treadmill.begin();
+    ESP_LOGI(TAG, "treadmill OK");
+
+    // 3. ATTACH ENCODER INTERRUPTS LAST
+    attachInterrupt(digitalPinToInterrupt(ENCODER_CLK), encoderISR, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(ENCODER_DT),  encoderISR, CHANGE);
 
     ESP_LOGI(TAG, "Tradmill v" FIRMWARE_VERSION " ready");
 }

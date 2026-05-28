@@ -28,18 +28,19 @@ public:
     LGFX_DIS08070H() {
         {
             auto cfg = _bus.config();
-            cfg.freq_write        = 14000000;
+            cfg.freq_write        = 10000000; // 12 MHz
             cfg.pin_hsync         = SCREEN_HSYNC;
             cfg.pin_vsync         = SCREEN_VSYNC;
             cfg.pin_pclk          = SCREEN_PCLK;
             cfg.pin_henable       = SCREEN_DE;
             cfg.panel             = &_panel;  // Bus_RGB requires back-pointer to panel
-            cfg.hsync_front_porch = 10;
-            cfg.hsync_pulse_width =  8;
-            cfg.hsync_back_porch  = 50;
-            cfg.vsync_front_porch = 10;
-            cfg.vsync_pulse_width =  8;
-            cfg.vsync_back_porch  = 20;
+            cfg.hsync_front_porch = 40;
+            cfg.hsync_pulse_width = 48;
+            cfg.hsync_back_porch  = 40;
+            cfg.vsync_front_porch = 13;
+            cfg.vsync_pulse_width = 1;
+            cfg.vsync_back_porch  = 31;
+            cfg.pclk_active_neg   = 1;
             // pin_data[]: B[0-4], G[0-5], R[0-4]
             cfg.pin_data[0]  = SCREEN_B0; cfg.pin_data[1]  = SCREEN_B1;
             cfg.pin_data[2]  = SCREEN_B2; cfg.pin_data[3]  = SCREEN_B3;
@@ -74,11 +75,18 @@ public:
             auto cfg            = _touch.config();
             cfg.x_min           = 0;  cfg.x_max = SCREEN_W - 1;
             cfg.y_min           = 0;  cfg.y_max = SCREEN_H - 1;
-            cfg.pin_int         = TOUCH_INT;
-            cfg.pin_rst         = TOUCH_RST;
+            // cfg.pin_int         = TOUCH_INT;
+            // cfg.pin_rst         = TOUCH_RST;
+            // cfg.pin_sda         = I2C_SDA;
+            // cfg.pin_scl         = I2C_SCL;
+            // cfg.i2c_port        = 0;
+            // cfg.i2c_addr        = 0x5D;  // <--- ADD THIS LINE HERE!
+            cfg.pin_int         = -1;     // -1 tells the ESP32 to leave this pin alone!
+            cfg.pin_rst         = -1;     // -1 tells the ESP32 to leave this pin alone!
             cfg.pin_sda         = I2C_SDA;
             cfg.pin_scl         = I2C_SCL;
             cfg.i2c_port        = 0;
+            cfg.i2c_addr        = 0x5D;   // Back to the factory default
             cfg.freq            = 400000;
             cfg.bus_shared      = false;
             cfg.offset_rotation = 0;

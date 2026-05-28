@@ -5,9 +5,14 @@
 // uint32_t covers both 8-bit (GC9A01, max 255) and 13-bit (ZX2D80CE02S, max 8191).
 static const uint32_t MAX_DUTY = (1u << PWM_RESOLUTION) - 1u;
 
+// Define a PWM channel for the ESP32 Core v2 API
+static const uint8_t PWM_CHANNEL = 0;
+
 void Treadmill::begin() {
-    ledcAttach(SPEED_PIN, PWM_FREQ_HZ, PWM_RESOLUTION);
-    ledcWrite(SPEED_PIN, 0);
+    // v2 API: setup channel, attach pin to channel, write to channel
+    ledcSetup(PWM_CHANNEL, PWM_FREQ_HZ, PWM_RESOLUTION);
+    ledcAttachPin(SPEED_PIN, PWM_CHANNEL);
+    ledcWrite(PWM_CHANNEL, 0);
 
     pinMode(INCLINE_UP_PIN,   OUTPUT); digitalWrite(INCLINE_UP_PIN,   LOW);
     pinMode(INCLINE_DOWN_PIN, OUTPUT); digitalWrite(INCLINE_DOWN_PIN, LOW);
@@ -33,7 +38,7 @@ void Treadmill::toggleRunning() {
     } else if (_running) {
         if (_targetSpeedMph < 0.01f) {
             // Already at zero — stop immediately.
-            ledcWrite(SPEED_PIN, 0);
+            ledcWrite(PWM_CHANNEL, 0);
             _running = false;
         } else {
             _stopping        = true;
@@ -99,11 +104,11 @@ void Treadmill::update() {
 void Treadmill::_applySpeed() {
     _speedMph = _targetSpeedMph;
     if (_speedMph < 0.01f) {
-        ledcWrite(SPEED_PIN, 0);
+        ledcWrite(PWM_CHANNEL, 0);
         return;
     }
     uint32_t duty = (uint32_t)((_speedMph / MAX_SPEED_MPH) * MAX_DUTY_PCT * MAX_DUTY);
-    ledcWrite(SPEED_PIN, duty);
+    ledcWrite(PWM_CHANNEL, duty);
 }
 
 void Treadmill::_updateIncline() {
@@ -137,7 +142,7 @@ void Treadmill::_updateIncline() {
 }
 
 void Treadmill::_stopAll() {
-    ledcWrite(SPEED_PIN, 0);
+    ledcWrite(PWM_CHANNEL, 0);
     digitalWrite(INCLINE_UP_PIN,   LOW);
     digitalWrite(INCLINE_DOWN_PIN, LOW);
     _speedMph       = 0.0f;
