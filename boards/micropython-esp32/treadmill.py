@@ -1,12 +1,15 @@
 import time
-from machine import Pin, ADC, PWM
+from machine import Pin, ADC, PWM, I2C
+from mcp23017 import MCP23017, IN, OUT
 from config import (
-    SPEED_PIN, INCLINE_UP_PIN, INCLINE_DOWN_PIN,
-    SPEED_POT_PIN, INCLINE_UP_BTN, INCLINE_DOWN_BTN,
-    SAFETY_KEY_PIN, PWM_FREQ, MAX_DUTY_CYCLE,
+    SPEED_PIN, SPEED_POT_PIN,
+    PWM_FREQ, MAX_DUTY_CYCLE,
     SPEED_ANALOG_THRESHOLD, MAX_SPEED_MPH,
     MAX_INCLINE_LEVEL, MIN_INCLINE_LEVEL, INCLINE_BTN_ACTIVE_LOW,
     ENCODER_SW,
+    MCP_I2C_SDA, MCP_I2C_SCL, MCP_I2C_ADDR,
+    MCP_INCLINE_UP, MCP_INCLINE_DOWN,
+    MCP_INCLINE_UP_BTN, MCP_INCLINE_DOWN_BTN, MCP_SAFETY_KEY,
 )
 
 _MAX_ADC = 4095   # ESP32 12-bit ADC
@@ -18,17 +21,25 @@ _SW_DEBOUNCE_MS = 50
 class Treadmill:
     def __init__(self):
         self.speed_pwm = PWM(Pin(SPEED_PIN), freq=PWM_FREQ, duty=0)
-        self.incline_up_out = Pin(INCLINE_UP_PIN, Pin.OUT, value=0)
-        self.incline_down_out = Pin(INCLINE_DOWN_PIN, Pin.OUT, value=0)
+
+        # MCP23017 on a dedicated I2C bus carries incline relays, incline
+        # buttons, and the safety key.  Speed PWM stays on a native GPIO.
+        i2c = I2C(1, sda=Pin(MCP_I2C_SDA), scl=Pin(MCP_I2C_SCL), freq=400000)
+        self.mcp = MCP23017(i2c, MCP_I2C_ADDR)
+        self.mcp.pin_mode(MCP_INCLINE_UP, OUT)
+        self.mcp.pin_mode(MCP_INCLINE_DOWN, OUT)
+        self.mcp.output(MCP_INCLINE_UP, 0)
+        self.mcp.output(MCP_INCLINE_DOWN, 0)
+        # Buttons use the expander's internal pull-ups when active-low.
+        self.mcp.pin_mode(MCP_INCLINE_UP_BTN, IN, pull_up=INCLINE_BTN_ACTIVE_LOW)
+        self.mcp.pin_mode(MCP_INCLINE_DOWN_BTN, IN, pull_up=INCLINE_BTN_ACTIVE_LOW)
 
         self.speed_pot = ADC(Pin(SPEED_POT_PIN))
         self.speed_pot.atten(ADC.ATTN_11DB)  # full 0–3.3V range
 
-        pull = Pin.PULL_UP if INCLINE_BTN_ACTIVE_LOW else Pin.PULL_DOWN
-        self.btn_up = Pin(INCLINE_UP_BTN, Pin.IN, pull)
-        self.btn_down = Pin(INCLINE_DOWN_BTN, Pin.IN, pull)
-
-        self.safety_key = Pin(SAFETY_KEY_PIN, Pin.IN) if SAFETY_KEY_PIN is not None else None
+        self.safety_key = MCP_SAFETY_KEY
+        if self.safety_key is not None:
+            self.mcp.pin_mode(self.safety_key, IN, pull_up=True)
         self.encoder_sw = Pin(ENCODER_SW, Pin.IN, Pin.PULL_UP)
 
         self.safety_triggered = False
@@ -46,7 +57,7 @@ class Treadmill:
 
     def update(self):
         pot_value = self.speed_pot.read()
-        safety_active = self.safety_key is not None and self.safety_key.value() == 0
+        safety_active = self.safety_key is not None and self.mcp.input(self.safety_key) == 0
 
         if safety_active and not self.safety_triggered:
             self._stop_all()
@@ -83,31 +94,32 @@ class Treadmill:
             self._last_sw_ms = now
         self._last_sw = pressed
 
-    def _btn_pressed(self, pin):
-        return pin.value() == 0 if INCLINE_BTN_ACTIVE_LOW else pin.value() == 1
+    def _btn_pressed(self, mcp_pin):
+        val = self.mcp.input(mcp_pin)
+        return val == 0 if INCLINE_BTN_ACTIVE_LOW else val == 1
 
     def _update_incline(self):
         now = time.ticks_ms()
         debounce_ok = time.ticks_diff(now, self._last_incline_ms) > _INCLINE_DEBOUNCE_MS
 
-        up = self._btn_pressed(self.btn_up)
-        down = self._btn_pressed(self.btn_down)
+        up = self._btn_pressed(MCP_INCLINE_UP_BTN)
+        down = self._btn_pressed(MCP_INCLINE_DOWN_BTN)
 
         if up and not down:
-            self.incline_up_out.value(1)
-            self.incline_down_out.value(0)
+            self.mcp.output(MCP_INCLINE_UP, 1)
+            self.mcp.output(MCP_INCLINE_DOWN, 0)
             if not self._last_btn_up and debounce_ok:
                 self.incline_level = min(self.incline_level + 1, MAX_INCLINE_LEVEL)
                 self._last_incline_ms = now
         elif down and not up:
-            self.incline_up_out.value(0)
-            self.incline_down_out.value(1)
+            self.mcp.output(MCP_INCLINE_UP, 0)
+            self.mcp.output(MCP_INCLINE_DOWN, 1)
             if not self._last_btn_down and debounce_ok:
                 self.incline_level = max(self.incline_level - 1, MIN_INCLINE_LEVEL)
                 self._last_incline_ms = now
         else:
-            self.incline_up_out.value(0)
-            self.incline_down_out.value(0)
+            self.mcp.output(MCP_INCLINE_UP, 0)
+            self.mcp.output(MCP_INCLINE_DOWN, 0)
 
         self._last_btn_up = up
         self._last_btn_down = down
@@ -125,6 +137,6 @@ class Treadmill:
 
     def _stop_all(self):
         self.speed_pwm.duty(0)
-        self.incline_up_out.value(0)
-        self.incline_down_out.value(0)
+        self.mcp.output(MCP_INCLINE_UP, 0)
+        self.mcp.output(MCP_INCLINE_DOWN, 0)
         self.speed_mph = 0.0
