@@ -14,14 +14,18 @@ void Treadmill::begin() {
     ledcAttachPin(SPEED_PIN, PWM_CHANNEL);
     ledcWrite(PWM_CHANNEL, 0);
 
-    pinMode(INCLINE_UP_PIN,   OUTPUT); digitalWrite(INCLINE_UP_PIN,   LOW);
-    pinMode(INCLINE_DOWN_PIN, OUTPUT); digitalWrite(INCLINE_DOWN_PIN, LOW);
+    // MCP23017 on its own I2C bus (Wire1), separate from any display/touch bus.
+    Wire1.begin(MCP_I2C_SDA, MCP_I2C_SCL);
+    _mcp.begin_I2C(MCP_I2C_ADDR, &Wire1);
 
-    if (INCLINE_UP_BTN   != -1) pinMode(INCLINE_UP_BTN,   INPUT_PULLUP);
-    if (INCLINE_DOWN_BTN != -1) pinMode(INCLINE_DOWN_BTN, INPUT_PULLUP);
+    _mcp.pinMode(MCP_INCLINE_UP_PIN,   OUTPUT); _mcp.digitalWrite(MCP_INCLINE_UP_PIN,   LOW);
+    _mcp.pinMode(MCP_INCLINE_DOWN_PIN, OUTPUT); _mcp.digitalWrite(MCP_INCLINE_DOWN_PIN, LOW);
 
-    if (SAFETY_KEY_PIN != -1) {
-        pinMode(SAFETY_KEY_PIN, INPUT);
+    if (MCP_INCLINE_UP_BTN   != -1) _mcp.pinMode(MCP_INCLINE_UP_BTN,   INPUT_PULLUP);
+    if (MCP_INCLINE_DOWN_BTN != -1) _mcp.pinMode(MCP_INCLINE_DOWN_BTN, INPUT_PULLUP);
+
+    if (MCP_SAFETY_KEY_PIN != -1) {
+        _mcp.pinMode(MCP_SAFETY_KEY_PIN, INPUT_PULLUP);
     }
 }
 
@@ -51,7 +55,7 @@ void Treadmill::toggleRunning() {
 }
 
 void Treadmill::update() {
-    bool safetyActive = (SAFETY_KEY_PIN != -1) && (digitalRead(SAFETY_KEY_PIN) == LOW);
+    bool safetyActive = (MCP_SAFETY_KEY_PIN != -1) && (_mcp.digitalRead(MCP_SAFETY_KEY_PIN) == LOW);
 
     if (safetyActive && !_safetyTriggered) {
         _stopAll();
@@ -115,26 +119,26 @@ void Treadmill::_updateIncline() {
     uint32_t now    = millis();
     bool debounceOk = (now - _lastInclineMs) > INCLINE_DEBOUNCE_MS;
 
-    bool up   = (INCLINE_UP_BTN   != -1) && (digitalRead(INCLINE_UP_BTN)   == LOW);
-    bool down = (INCLINE_DOWN_BTN != -1) && (digitalRead(INCLINE_DOWN_BTN) == LOW);
+    bool up   = (MCP_INCLINE_UP_BTN   != -1) && (_mcp.digitalRead(MCP_INCLINE_UP_BTN)   == LOW);
+    bool down = (MCP_INCLINE_DOWN_BTN != -1) && (_mcp.digitalRead(MCP_INCLINE_DOWN_BTN) == LOW);
 
     if (up && !down) {
-        digitalWrite(INCLINE_UP_PIN,   HIGH);
-        digitalWrite(INCLINE_DOWN_PIN, LOW);
+        _mcp.digitalWrite(MCP_INCLINE_UP_PIN,   HIGH);
+        _mcp.digitalWrite(MCP_INCLINE_DOWN_PIN, LOW);
         if (!_lastBtnUp && debounceOk) {
             _inclineLevel  = min(_inclineLevel + 1, MAX_INCLINE_LEVEL);
             _lastInclineMs = now;
         }
     } else if (down && !up) {
-        digitalWrite(INCLINE_UP_PIN,   LOW);
-        digitalWrite(INCLINE_DOWN_PIN, HIGH);
+        _mcp.digitalWrite(MCP_INCLINE_UP_PIN,   LOW);
+        _mcp.digitalWrite(MCP_INCLINE_DOWN_PIN, HIGH);
         if (!_lastBtnDown && debounceOk) {
             _inclineLevel  = max(_inclineLevel - 1, MIN_INCLINE_LEVEL);
             _lastInclineMs = now;
         }
     } else {
-        digitalWrite(INCLINE_UP_PIN,   LOW);
-        digitalWrite(INCLINE_DOWN_PIN, LOW);
+        _mcp.digitalWrite(MCP_INCLINE_UP_PIN,   LOW);
+        _mcp.digitalWrite(MCP_INCLINE_DOWN_PIN, LOW);
     }
 
     _lastBtnUp   = up;
@@ -143,8 +147,8 @@ void Treadmill::_updateIncline() {
 
 void Treadmill::_stopAll() {
     ledcWrite(PWM_CHANNEL, 0);
-    digitalWrite(INCLINE_UP_PIN,   LOW);
-    digitalWrite(INCLINE_DOWN_PIN, LOW);
+    _mcp.digitalWrite(MCP_INCLINE_UP_PIN,   LOW);
+    _mcp.digitalWrite(MCP_INCLINE_DOWN_PIN, LOW);
     _speedMph       = 0.0f;
     _targetSpeedMph = 0.0f;  // safety reset: user must dial back to 0 to clear latch
 }

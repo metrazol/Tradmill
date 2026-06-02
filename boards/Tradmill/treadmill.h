@@ -1,5 +1,7 @@
 #pragma once
 #include <Arduino.h>
+#include <Wire.h>
+#include <Adafruit_MCP23X17.h>
 
 class Treadmill {
 public:
@@ -37,6 +39,10 @@ private:
     bool     _lastBtnUp       = false;
     bool     _lastBtnDown     = false;
     uint32_t _lastInclineMs   = 0;
+
+    // MCP23017 I2C expander carrying incline relays, incline buttons,
+    // and the safety key.  Speed PWM stays on a native LEDC GPIO.
+    Adafruit_MCP23X17 _mcp;
 
     void _applySpeed();
     void _updateIncline();
