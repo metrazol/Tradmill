@@ -53,12 +53,24 @@
 #define ENCODER_SW   12
 
 // ---- Treadmill motor control ----
+// Speed PWM stays on a native LEDC GPIO (the MCP23017 cannot generate a clean
+// 20 Hz signal).  Incline relays, incline buttons, and the safety key all move
+// onto an MCP23017 I2C expander (see below).
 #define SPEED_PIN         10  // PWM output → MC2100 speed input
-#define INCLINE_UP_PIN    11  // Relay: incline up
-#define INCLINE_DOWN_PIN  17  // Relay: incline down
-#define INCLINE_UP_BTN    18  // Active-low button
-#define INCLINE_DOWN_BTN  -1  // Not enough free pins — incline-down button not wired
-#define SAFETY_KEY_PIN    -1
+
+// ---- MCP23017 I2C GPIO expander (incline relays + buttons + safety key) ----
+// Dedicated I2C bus (Wire1), separate from the GT911 touch bus (SDA 19 / SCL 20).
+// GPIO 17/18 are free now that the incline signals moved to the expander.
+// The expander also restores the incline-down button this board previously
+// lacked due to GPIO scarcity.
+#define MCP_I2C_SDA          17
+#define MCP_I2C_SCL          18
+#define MCP_I2C_ADDR         0x20  // A0-A2 tied to GND
+#define MCP_INCLINE_UP_PIN    0    // GPA0 → relay: incline up
+#define MCP_INCLINE_DOWN_PIN  1    // GPA1 → relay: incline down
+#define MCP_INCLINE_UP_BTN    8    // GPB0 ← active-low button (internal pull-up)
+#define MCP_INCLINE_DOWN_BTN  9    // GPB1 ← active-low button (internal pull-up)
+#define MCP_SAFETY_KEY_PIN   -1    // GPB2 ← safety key; set to 10 to enable, -1 to disable
 
 // ---- Speed / PWM ----
 // Same ESP32-S3 LEDC peripheral as ZX2D80CE02S — identical timing.

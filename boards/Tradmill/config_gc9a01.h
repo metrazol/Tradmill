@@ -21,13 +21,23 @@
 #define ENCODER_SW   41   // click button, active-low (INPUT_PULLUP)
 
 // ---- Treadmill motor control ----
+// Speed PWM stays on a native LEDC GPIO (the MCP23017 cannot generate a clean
+// 20 Hz signal).  Incline relays, incline buttons, and the safety key all move
+// onto an MCP23017 I2C expander (see below).
 // GPIO 15-21 are safe general-purpose pins on the ESP32-S3 WROOM module.
 #define SPEED_PIN         15  // PWM output → MC2100 speed input
-#define INCLINE_UP_PIN    16  // Relay: incline up
-#define INCLINE_DOWN_PIN  17  // Relay: incline down
-#define INCLINE_UP_BTN    18  // Active-low button (INPUT_PULLUP)
-#define INCLINE_DOWN_BTN  19  // Active-low button (INPUT_PULLUP)
-#define SAFETY_KEY_PIN    -1  // Set to a pin number to enable, -1 to disable
+
+// ---- MCP23017 I2C GPIO expander (incline relays + buttons + safety key) ----
+// Dedicated I2C bus (Wire1), separate from any display/touch bus.
+// GPIO 20/21 are free now that the incline/safety signals moved to the expander.
+#define MCP_I2C_SDA          21
+#define MCP_I2C_SCL          20
+#define MCP_I2C_ADDR         0x20  // A0-A2 tied to GND
+#define MCP_INCLINE_UP_PIN    0    // GPA0 → relay: incline up
+#define MCP_INCLINE_DOWN_PIN  1    // GPA1 → relay: incline down
+#define MCP_INCLINE_UP_BTN    8    // GPB0 ← active-low button (internal pull-up)
+#define MCP_INCLINE_DOWN_BTN  9    // GPB1 ← active-low button (internal pull-up)
+#define MCP_SAFETY_KEY_PIN   -1    // GPB2 ← safety key; set to 10 to enable, -1 to disable
 
 // ---- Speed / PWM ----
 // 8-bit resolution gives div_num = 80M / (20 * 256) = 15625, which fits
