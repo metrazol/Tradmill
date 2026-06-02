@@ -15,9 +15,25 @@ targets live in this single repository — pick your board and flash.
 
 All three targets drive the same treadmill hardware:
 
-- **Motor speed** — MC2100 controller via 20 Hz PWM
+- **Motor speed** — MC2100 controller via 20 Hz PWM on a native MCU GPIO
 - **Incline** — relay pair driven by two active-low push buttons
 - **Safety key** — optional digital input; kills the motor if pulled low
+
+Incline relays, incline buttons, and the safety key are wired to an
+**MCP23017 I2C GPIO expander** (address `0x20`) on a dedicated I2C bus,
+separate from any display/touch bus.  The motor speed PWM stays on a native
+GPIO — the MCP23017 cannot generate a clean 20 Hz signal.
+
+Set the expander's `A0`/`A1`/`A2` address pins to GND for address `0x20`.
+The expander pin map is the same on every target:
+
+| Treadmill signal | MCP23017 pin |
+|---|---|
+| Incline up relay | GPA0 (pin 0) |
+| Incline down relay | GPA1 (pin 1) |
+| Incline up button | GPB0 (pin 8) |
+| Incline down button | GPB1 (pin 9) |
+| Safety key (optional) | GPB2 (pin 10) |
 
 ---
 
@@ -63,8 +79,11 @@ No selection needed — just deploy the Python files to your device.
 | GC9A01 | `lvgl` ≥ 8.x | Library Manager |
 | ZX2D80CE02S | `LovyanGFX` | Library Manager |
 | ZX2D80CE02S | `lvgl` ≥ 8.x | Library Manager |
+| _all boards_ | `Adafruit MCP23017 Arduino Library` | Library Manager |
 
-Only the libraries for your selected board need to be installed.
+Install the libraries for your selected board, plus the Adafruit MCP23017
+library (pulls in `Adafruit BusIO`) which every board needs for the
+treadmill incline/safety I/O.
 
 ---
 
@@ -75,16 +94,18 @@ Only the libraries for your selected board need to be installed.
 | Signal | GPIO |
 |---|---|
 | Speed PWM out | 18 |
-| Incline up relay | 19 |
-| Incline down relay | 23 |
 | Speed potentiometer | 34 |
-| Incline up button | 25 |
-| Incline down button | 26 |
 | Display SDA | 21 |
 | Display SCL | 22 |
+| MCP23017 SDA | 16 |
+| MCP23017 SCL | 17 |
 | Encoder CLK | 32 |
 | Encoder DT | 33 |
 | Encoder SW (click) | 35 |
+
+Incline relays, incline buttons, and the safety key are on the MCP23017
+expander (see the expander pin map above), reached via the MCP23017 SDA/SCL
+bus.
 
 ### CrowPanel GC9A01 (ESP32-S3)
 
@@ -93,7 +114,23 @@ See `boards/Tradmill/config_gc9a01.h` for the full pin list.
 ### Smartpanel ZX2D80CE02S (ESP32-S3)
 
 See `boards/Tradmill/config_zx2d80ce02s.h` for the full pin list.
-Note: incline buttons repurpose the RS485 RXD/RTS pins (GPIO 4/5).
+Note: the MCP23017 I2C bus repurposes the RS485 RXD/RTS pins (GPIO 4/5),
+so RS485 is unavailable while the expander is in use.
+
+### Elecrow CrowPanel 7" DIS08070H (ESP32-S3)
+
+See `boards/Tradmill/config_dis08070h.h` for the full pin list.
+The MCP23017 bus uses GPIO 17/18.  Moving incline I/O onto the expander
+restores the incline-down button this board previously lacked.
+
+### MCP23017 I2C bus per board
+
+| Board | MCP SDA | MCP SCL |
+|---|---|---|
+| MicroPython ESP32 | 16 | 17 |
+| GC9A01 | 21 | 20 |
+| ZX2D80CE02S | 4 | 5 (RS485 repurposed) |
+| DIS08070H | 17 | 18 |
 
 ---
 
@@ -105,6 +142,7 @@ boards/
 │   ├── config.py         # Pin and tuning constants — edit this for your wiring
 │   ├── main.py           # Entry point and main loop
 │   ├── treadmill.py      # Motor, incline, safety, and encoder-click logic
+│   ├── mcp23017.py       # MCP23017 I2C GPIO expander driver
 │   ├── display.py        # SSD1306 OLED driver wrapper
 │   └── blink.py          # GPIO blink utility for hardware testing
 └── Tradmill/             # Arduino sketch (open this folder in Arduino IDE)
