@@ -25,8 +25,8 @@
 #define SCREEN_DC     2
 #define SCREEN_RST   -1   // tied to the board reset line
 #define SCREEN_BL    21   // PWM backlight — drive HIGH for full brightness
-#define SCREEN_W    240
-#define SCREEN_H    320
+#define SCREEN_W    320   // landscape
+#define SCREEN_H    240   // landscape
 
 // ---- Touch controller (XPT2046 resistive, via SPI / VSPI) ----
 #define TOUCH_SCLK   25
