@@ -5,7 +5,7 @@
 // in config.h, ui_gc9a01.cpp, and ui_zx2d80ce02s.cpp.
 // ============================================================
 
-#define FIRMWARE_VERSION "1.0.16"
+#define FIRMWARE_VERSION "1.0.17"
 
 #include <Arduino.h>
 #include <lvgl.h>
@@ -18,6 +18,9 @@ static const char *TAG = "Tradmill";
 
 // ---- Rotary encoder ISR ----------------------------------------------------
 // Quadrature decoding via 4-bit state table.  Runs on both CLK and DT edges.
+// Compiled in only on boards that define ENCODER_CLK.  Touch-only boards (e.g.
+// DIS08070H) omit the encoder entirely and drive the UI from touch callbacks.
+#ifdef ENCODER_CLK
 
 static volatile int32_t encoderCount = 0;
 static volatile uint8_t lastEncoded  = 0;
@@ -34,6 +37,8 @@ void IRAM_ATTR encoderISR() {
     lastEncoded = encoded;
 }
 
+#endif // ENCODER_CLK
+
 // ---- Objects ---------------------------------------------------------------
 
 static Treadmill treadmill;
@@ -46,6 +51,10 @@ static void onStopButton() {
     treadmill.toggleRunning();
 }
 
+static void onInclineAdjust(int32_t steps) {
+    treadmill.adjustIncline(steps);
+}
+
 // ---- Setup -----------------------------------------------------------------
 
 void setup() {
@@ -56,24 +65,29 @@ void setup() {
         psramFound() ? "found" : "MISSING",
         (unsigned)ESP.getPsramSize(), (unsigned)ESP.getFreeHeap());
 
+#ifdef ENCODER_CLK
     pinMode(ENCODER_CLK, INPUT_PULLUP);
     pinMode(ENCODER_DT,  INPUT_PULLUP);
     pinMode(ENCODER_SW,  INPUT_PULLUP);
     lastEncoded = (digitalRead(ENCODER_CLK) << 1) | digitalRead(ENCODER_DT);
-    
+#endif
+
     // 1. INITIALIZE DISPLAY FIRST so it gets the LCD_CAM interrupts
     ui_init();
     ESP_LOGI(TAG, "ui_init OK");
     ui_set_speed_callback(onSpeedAdjust);
     ui_set_stop_callback(onStopButton);
+    ui_set_incline_callback(onInclineAdjust);
 
     // 2. INITIALIZE TREADMILL (PWM/LEDC) SECOND
     treadmill.begin();
     ESP_LOGI(TAG, "treadmill OK");
 
+#ifdef ENCODER_CLK
     // 3. ATTACH ENCODER INTERRUPTS LAST
     attachInterrupt(digitalPinToInterrupt(ENCODER_CLK), encoderISR, CHANGE);
     attachInterrupt(digitalPinToInterrupt(ENCODER_DT),  encoderISR, CHANGE);
+#endif
 
     ESP_LOGI(TAG, "Tradmill v" FIRMWARE_VERSION " ready");
 }
@@ -82,9 +96,11 @@ void setup() {
 
 static uint32_t lastLvglTick      = 0;
 static uint32_t lastDisplayUpdate = 0;
+#ifdef ENCODER_CLK
 static uint32_t lastSwCheck       = 0;
 static int32_t  lastEncoderCount  = 0;
 static bool     lastSwPressed     = false;
+#endif
 
 void loop() {
     uint32_t now = millis();
@@ -93,6 +109,7 @@ void loop() {
     lv_tick_inc(now - lastLvglTick);
     lastLvglTick = now;
 
+#ifdef ENCODER_CLK
     // Encoder rotation → speed
     int32_t enc   = encoderCount;
     int32_t delta = enc - lastEncoderCount;
@@ -110,6 +127,7 @@ void loop() {
         lastSwPressed = pressed;
         lastSwCheck   = now;
     }
+#endif // ENCODER_CLK
 
     treadmill.update();
 

@@ -12,6 +12,7 @@ targets live in this single repository — pick your board and flash.
 | MicroPython ESP32 | `boards/micropython-esp32/` | SSD1306 128×64 OLED (I2C) | ESP32 |
 | CrowPanel 1.28" round | `boards/Tradmill/` (`BOARD_GC9A01`) | GC9A01 240×240 (SPI) | ESP32-S3 |
 | Smartpanel ZX2D80CE02S | `boards/Tradmill/` (`BOARD_ZX2D80CE02S`) | ST7789 240×320 (8080 parallel) + touch | ESP32-S3 |
+| AITRIP/Sunton CYD ESP32-2432S028R | `boards/Tradmill/` (`BOARD_ESP32_2432S028R`) | ILI9341 240×320 (SPI) + XPT2046 resistive touch | ESP32 |
 
 All three targets drive the same treadmill hardware:
 
@@ -59,8 +60,9 @@ No selection needed — just deploy the Python files to your device.
 2. **Open `board_select.h` and uncomment exactly one `#define`:**
 
 ```cpp
-// #define BOARD_GC9A01       // CrowPanel 1.28" 240x240 round
-// #define BOARD_ZX2D80CE02S  // Smartpanel ZX2D80CE02S 240x320
+// #define BOARD_GC9A01            // CrowPanel 1.28" 240x240 round
+// #define BOARD_ZX2D80CE02S       // Smartpanel ZX2D80CE02S 240x320
+// #define BOARD_ESP32_2432S028R   // AITRIP/Sunton CYD 2.8" 240x320
 ```
 
 3. Install the required libraries for your board (see below).
@@ -123,6 +125,52 @@ See `boards/Tradmill/config_dis08070h.h` for the full pin list.
 The MCP23017 bus uses GPIO 17/18.  Moving incline I/O onto the expander
 restores the incline-down button this board previously lacked.
 
+**Touch (GT911):** the capacitive touch I2C bus runs on GPIO 19/20, which are
+also the ESP32-S3 USB_SERIAL_JTAG D-/D+ pins.  The firmware disables the USB PHY
+at boot (`ui_dis08070h.cpp`) so the I2C bus stops hanging with timeouts —
+without this, touch never responds.  Because of that you must set Arduino IDE
+*Tools → USB CDC On Boot: **Disabled*** so serial logging stays on UART0
+(GPIO 43/44); USB-CDC serial will not work on this board.
+
+The GT911 address is strapped by GPIO 38 at power-on and varies per unit
+(`0x5D` most common, `0x14` otherwise).  If touch is dead after flashing,
+flip `TOUCH_I2C_ADDR` in `config_dis08070h.h` to `0x14`.  Do **not** drive the
+INT/RST lines (they go through the on-board PCA9557 and a board pull-up already
+releases the GT911 from reset).
+
+### AITRIP/Sunton ESP32-2432S028R (CYD, ESP32)
+
+See `boards/Tradmill/config_esp32_2432s028r.h` for the full pin list.
+
+The display and touch live on **two separate SPI buses**:
+
+| Signal | GPIO | Bus |
+|---|---|---|
+| Display SCLK | 14 | HSPI |
+| Display MOSI | 13 | HSPI |
+| Display MISO | 12 | HSPI |
+| Display CS | 15 | HSPI |
+| Display DC | 2 | HSPI |
+| Display RST | -1 (board reset) | — |
+| Display backlight | 21 | PWM |
+| Touch CLK | 25 | VSPI |
+| Touch MOSI | 32 | VSPI |
+| Touch MISO | 39 | VSPI |
+| Touch CS | 33 | VSPI |
+| Touch IRQ | 36 | — |
+
+The MCP23017 I2C bus uses GPIO 22 (SDA) and GPIO 5 (SCL).  GPIO 5 is the
+on-board SD-card CS pin, repurposed here because the firmware never uses the
+microSD slot.  The motor speed PWM output is on GPIO 27.
+
+This board has no rotary encoder — all control is via the touch screen,
+identical in operation to the ZX2D80CE02S.
+
+**Touch calibration:** the raw XPT2046 range is set to `x_min=300 / x_max=3900
+/ y_min=200 / y_max=3700` in `ui_esp32_2432s028r.cpp`.  If taps feel offset,
+touch the four corners with a stylus and note the raw values from Serial, then
+update those four constants.
+
 ### MCP23017 I2C bus per board
 
 | Board | MCP SDA | MCP SCL |
@@ -131,6 +179,7 @@ restores the incline-down button this board previously lacked.
 | GC9A01 | 21 | 20 |
 | ZX2D80CE02S | 4 | 5 (RS485 repurposed) |
 | DIS08070H | 17 | 18 |
+| ESP32-2432S028R | 22 | 5 (SD CS repurposed) |
 
 ---
 
@@ -150,9 +199,11 @@ boards/
     ├── config.h          # Dispatches to the selected board config
     ├── config_gc9a01.h   # Pin and PWM constants for the GC9A01 board
     ├── config_zx2d80ce02s.h  # Pin and PWM constants for the ZX2D80CE02S board
+    ├── config_esp32_2432s028r.h  # Pin and PWM constants for the CYD board
     ├── treadmill.h / .cpp    # Motor, incline, safety logic — shared by both boards
     ├── ui.h                  # Display interface (init / update / speed callback)
     ├── ui_gc9a01.cpp         # GC9A01 display init + LVGL widgets
+    ├── ui_esp32_2432s028r.cpp  # CYD ILI9341 + XPT2046 display init + LVGL widgets + touch
     ├── ui_zx2d80ce02s.cpp    # ZX2D80CE02S display init + LVGL widgets + touch
     └── Tradmill.ino          # Main loop — board-agnostic
 ```

@@ -1,8 +1,8 @@
 #include "board_select.h"
-#ifdef BOARD_ZX2D80CE02S
+#ifdef BOARD_ESP32_2432S028R
 // ============================================================
-// Display + UI implementation for Smartpanel ZX2D80CE02S
-// (240x320, ST7789 via 8080 8-bit parallel, FT5x06 touch)
+// Display + UI implementation for AITRIP / Sunton ESP32-2432S028R (CYD)
+// (240x320, ILI9341 via SPI + XPT2046 resistive touch via a 2nd SPI bus)
 // ============================================================
 
 #include <Arduino.h>
@@ -12,23 +12,31 @@
 #include "ui.h"
 
 // ---- LovyanGFX board configuration -----------------------------------------
+// The CYD wires the display and the touch controller to TWO different SPI
+// buses: the ILI9341 on HSPI and the XPT2046 on VSPI.  LovyanGFX handles this
+// by giving the touch its own SPI host (spi_host = VSPI_HOST) while the panel
+// bus uses HSPI_HOST.
 
-class LGFX_ZX2D80CE02S : public lgfx::LGFX_Device {
-    lgfx::Panel_ST7789  _panel;
-    lgfx::Bus_Parallel8 _bus;
+class LGFX_ESP32_2432S028R : public lgfx::LGFX_Device {
+    lgfx::Panel_ILI9341 _panel;
+    lgfx::Bus_SPI       _bus;
     lgfx::Light_PWM     _light;
-    lgfx::Touch_FT5x06  _touch;
+    lgfx::Touch_XPT2046 _touch;
 public:
-    LGFX_ZX2D80CE02S() {
+    LGFX_ESP32_2432S028R() {
         {
-            auto cfg       = _bus.config();
-            cfg.port       = 0;
-            cfg.freq_write = 20000000;
-            cfg.pin_wr = SCREEN_WR; cfg.pin_rd = SCREEN_RD; cfg.pin_rs = SCREEN_DC;
-            cfg.pin_d0 = SCREEN_D0; cfg.pin_d1 = SCREEN_D1;
-            cfg.pin_d2 = SCREEN_D2; cfg.pin_d3 = SCREEN_D3;
-            cfg.pin_d4 = SCREEN_D4; cfg.pin_d5 = SCREEN_D5;
-            cfg.pin_d6 = SCREEN_D6; cfg.pin_d7 = SCREEN_D7;
+            auto cfg        = _bus.config();
+            cfg.spi_host    = HSPI_HOST;
+            cfg.spi_mode    = 0;
+            cfg.freq_write  = 40000000;
+            cfg.freq_read   = 16000000;
+            cfg.spi_3wire   = false;
+            cfg.use_lock    = true;
+            cfg.dma_channel = SPI_DMA_CH_AUTO;
+            cfg.pin_sclk    = SCREEN_SCLK;
+            cfg.pin_mosi    = SCREEN_MOSI;
+            cfg.pin_miso    = SCREEN_MISO;
+            cfg.pin_dc      = SCREEN_DC;
             _bus.config(cfg);
             _panel.setBus(&_bus);
         }
@@ -40,9 +48,12 @@ public:
             cfg.memory_width  = SCREEN_W;  cfg.panel_width  = SCREEN_W;
             cfg.memory_height = SCREEN_H;  cfg.panel_height = SCREEN_H;
             cfg.offset_x      = 0;  cfg.offset_y = 0;
-            cfg.offset_rotation = 2;
-            cfg.invert        = true;
-            cfg.rgb_order     = true;
+            cfg.offset_rotation = 0;
+            cfg.readable      = true;
+            // The dual-USB CYD (ILI9341 variant) is wired with reversed R/B
+            // polarity and inverted colours.  These two flags fix that.
+            cfg.invert        = false;
+            cfg.rgb_order     = false;
             cfg.dlen_16bit    = false;
             cfg.bus_shared    = false;
             _panel.config(cfg);
@@ -51,22 +62,24 @@ public:
             auto cfg        = _light.config();
             cfg.pin_bl      = SCREEN_BL;
             cfg.invert      = false;
-            cfg.freq        = 21111;
+            cfg.freq        = 12000;
             cfg.pwm_channel = 7;
             _light.config(cfg);
             _panel.setLight(&_light);
         }
         {
             auto cfg            = _touch.config();
-            cfg.x_min           = 0;  cfg.x_max = SCREEN_W - 1;
-            cfg.y_min           = 0;  cfg.y_max = SCREEN_H - 1;
-            cfg.pin_int         = TOUCH_INT;
-            cfg.pin_sda         = I2C_SDA;
-            cfg.pin_scl         = I2C_SCL;
-            cfg.i2c_port        = 1;
-            cfg.freq            = 400000;
+            cfg.x_min           = 300;  cfg.x_max = 3900;   // raw XPT2046 range
+            cfg.y_min           = 200;  cfg.y_max = 3700;
+            cfg.pin_int         = TOUCH_IRQ;
             cfg.bus_shared      = false;
             cfg.offset_rotation = 0;
+            cfg.spi_host        = VSPI_HOST;   // touch on its OWN SPI bus
+            cfg.freq            = 1000000;
+            cfg.pin_sclk        = TOUCH_SCLK;
+            cfg.pin_mosi        = TOUCH_MOSI;
+            cfg.pin_miso        = TOUCH_MISO;
+            cfg.pin_cs          = TOUCH_CS;
             _touch.config(cfg);
             _panel.setTouch(&_touch);
         }
@@ -74,7 +87,7 @@ public:
     }
 };
 
-static LGFX_ZX2D80CE02S _gfx;
+static LGFX_ESP32_2432S028R _gfx;
 
 // ---- LVGL glue --------------------------------------------------------------
 
@@ -189,13 +202,13 @@ static lv_obj_t *make_incline_btn(lv_obj_t *scr, const char *label,
     return btn;
 }
 
-// ---- Arc colour: blue → green → yellow → red with speed (km/h, 0–10) -------
+// ---- Arc colour: blue → green → yellow → red with speed (mph, 0–12) --------
 
-static lv_color_t speed_colour(float kmh) {
-    if      (kmh < 3.0f)  return lv_color_hex(0x00C8FF);  // easy walk
-    else if (kmh < 6.0f)  return lv_color_hex(0x00E060);  // brisk
-    else if (kmh < 8.5f)  return lv_color_hex(0xFFCC00);  // fast
-    else                  return lv_color_hex(0xFF4444);  // max
+static lv_color_t speed_colour(float mph) {
+    if      (mph < 4.0f)  return lv_color_hex(0x00C8FF);  // blue-white: easy
+    else if (mph < 8.0f)  return lv_color_hex(0x00E060);  // green: moderate
+    else if (mph < 10.0f) return lv_color_hex(0xFFCC00);  // yellow: hard
+    else                  return lv_color_hex(0xFF4444);  // red: max
 }
 
 // ---- Public interface -------------------------------------------------------
@@ -214,6 +227,7 @@ void ui_set_incline_callback(void (*cb)(int32_t steps)) {
 
 void ui_init() {
     _gfx.init();
+    _gfx.setRotation(0);        // portrait 240x320
     _gfx.fillScreen(TFT_BLACK);
 
     lv_init();
@@ -260,7 +274,7 @@ void ui_init() {
     _lbl_unit = lv_label_create(scr);
     lv_obj_set_style_text_font(_lbl_unit, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(_lbl_unit, lv_color_hex(0xAAAAAA), 0);
-    lv_label_set_text(_lbl_unit, "km/h");
+    lv_label_set_text(_lbl_unit, "mph");
     lv_obj_align_to(_lbl_unit, _lbl_speed, LV_ALIGN_OUT_BOTTOM_MID, 0, 4);
 
     // Incline level readout (centre) flanked by the incline − / + buttons.
@@ -308,7 +322,7 @@ void ui_init() {
     lv_obj_add_flag(_lbl_safety, LV_OBJ_FLAG_HIDDEN);
 }
 
-void ui_update(float speed_kmh, int incline, uint32_t elapsed_sec,
+void ui_update(float speed_mph, int incline, uint32_t elapsed_sec,
                bool safety, bool running) {
     if (safety) {
         lv_obj_add_flag(_arc,          LV_OBJ_FLAG_HIDDEN);
@@ -343,11 +357,11 @@ void ui_update(float speed_kmh, int incline, uint32_t elapsed_sec,
         lv_obj_set_style_bg_color(_btn_stop, lv_color_hex(0x226622), 0);
     }
 
-    lv_arc_set_value(_arc, (int16_t)(speed_kmh * 10));
-    lv_obj_set_style_arc_color(_arc, speed_colour(speed_kmh), LV_PART_INDICATOR);
+    lv_arc_set_value(_arc, (int16_t)(speed_mph * 10));
+    lv_obj_set_style_arc_color(_arc, speed_colour(speed_mph), LV_PART_INDICATOR);
 
     char buf[16];
-    snprintf(buf, sizeof(buf), "%.1f", speed_kmh);
+    snprintf(buf, sizeof(buf), "%.1f", speed_mph);
     lv_label_set_text(_lbl_speed, buf);
 
     snprintf(buf, sizeof(buf), "Incline %d", incline);
@@ -358,4 +372,4 @@ void ui_update(float speed_kmh, int incline, uint32_t elapsed_sec,
     lv_label_set_text(_lbl_time, buf);
 }
 
-#endif // BOARD_ZX2D80CE02S
+#endif // BOARD_ESP32_2432S028R

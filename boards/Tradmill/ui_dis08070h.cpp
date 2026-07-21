@@ -6,16 +6,134 @@
 // ============================================================
 
 #include <Arduino.h>
+#include <Wire.h>
 #include <lvgl.h>
 #include <LovyanGFX.hpp>
 // Panel_RGB and Bus_RGB are platform-specific and not auto-included by LovyanGFX.hpp
 #include <lgfx/v1/platforms/esp32s3/Bus_RGB.hpp>
 #include <lgfx/v1/platforms/esp32s3/Panel_RGB.hpp>
 #include "esp_log.h"
+#include "esp_idf_version.h"
+#include "soc/usb_serial_jtag_reg.h"
+#include "soc/io_mux_reg.h"
+#include "hal/usb_serial_jtag_ll.h"
 #include "config.h"
 #include "ui.h"
 
 static const char *TAG_UI = "ui_dis";
+
+// ---- Free GPIO 19/20 for the GT911 touch I2C bus ---------------------------
+// On this board the GT911 lives on GPIO 19/20, which are also the ESP32-S3
+// USB_SERIAL_JTAG D-/D+ pins.  The USB PHY pad keeps driving those lines even
+// after the I2C driver claims them, so the touch bus hangs with continuous
+// "I2C software timeout" errors and touch never works.  Disabling the USB PHY
+// before app startup hands the pins back to the I2C peripheral.
+//
+// NOTE: this kills USB-CDC serial.  Keep Arduino "USB CDC On Boot: Disabled" so
+// logging continues over UART0 (GPIO 43/44).
+static __attribute__((constructor(101))) void disable_usb_serial_jtag_phy() {
+    // The HAL helper was renamed across ESP-IDF versions:
+    //   IDF 4.4 (Arduino core 2.x): usb_serial_jtag_ll_enable_pad(bool)
+    //   IDF 5.x:                    usb_serial_jtag_ll_phy_enable_pad(bool)
+#if defined(USB_SERIAL_JTAG_LL_PHY_ENABLE_PAD) || ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+    usb_serial_jtag_ll_phy_enable_pad(false);
+#else
+    usb_serial_jtag_ll_enable_pad(false);
+#endif
+    CLEAR_PERI_REG_MASK(USB_SERIAL_JTAG_CONF0_REG, USB_SERIAL_JTAG_USB_PAD_ENABLE);
+    CLEAR_PERI_REG_MASK(USB_SERIAL_JTAG_CONF0_REG, USB_SERIAL_JTAG_DP_PULLUP);
+    PIN_FUNC_SELECT(IO_MUX_GPIO19_REG, PIN_FUNC_GPIO);
+    PIN_FUNC_SELECT(IO_MUX_GPIO20_REG, PIN_FUNC_GPIO);
+    PIN_INPUT_ENABLE(IO_MUX_GPIO19_REG);
+    PIN_INPUT_ENABLE(IO_MUX_GPIO20_REG);
+    REG_SET_BIT(IO_MUX_GPIO19_REG, FUN_PU);
+    REG_SET_BIT(IO_MUX_GPIO20_REG, FUN_PU);
+    REG_CLR_BIT(IO_MUX_GPIO19_REG, FUN_PD);
+    REG_CLR_BIT(IO_MUX_GPIO20_REG, FUN_PD);
+}
+
+// ---- GT911 power-on: PCA9557-driven reset + address strap ------------------
+// The GT911's RST and INT lines are not wired to the ESP32 directly — they run
+// through the on-board PCA9557 I/O expander (I2C 0x18) on the same bus as the
+// touch controller (SDA 19 / SCL 20).
+//
+// The GT911 latches its I2C address from the INT pin level on the *rising* edge
+// of RST:  INT low  -> 0x5D,  INT high -> 0x14.  Until RST is released the GT911
+// stays in reset and ACKs at no address, which is why simply changing
+// TOUCH_I2C_ADDR never fixed touch.  This routine drives a deterministic
+// sequence (INT low, hold RST low, then release RST) so the GT911 boots and
+// answers at 0x5D every time.
+//
+// PCA9557 registers: 0x00 input, 0x01 output, 0x02 polarity, 0x03 config
+// (config bit = 1 -> input, 0 -> output).
+
+static bool i2c_present(uint8_t addr);   // defined below
+
+static bool pca9557_write(uint8_t reg, uint8_t val) {
+    Wire.beginTransmission(PCA9557_I2C_ADDR);
+    Wire.write(reg);
+    Wire.write(val);
+    return Wire.endTransmission() == 0;
+}
+
+// Reproduces Elecrow's official CrowPanel 7" V3.0 reset timing exactly:
+//   Wire.begin(19,20); Out.reset(); setMode(OUTPUT);
+//   IO0=LOW, IO1=LOW; delay(20); IO0=HIGH; delay(100); IO1->INPUT;
+// IO0 = GT911 RST, IO1 = GT911 INT.  Holding INT low while RST rises selects
+// I2C address 0x5D; INT is then switched back to an input so the GT911 can use
+// it as its interrupt output.
+//
+// PCA9557 registers: 0x00 input, 0x01 output, 0x02 polarity, 0x03 config
+// (config bit 1 = input, 0 = output).
+static void gt911_reset_sequence() {
+    const uint8_t io0 = (1 << PCA9557_GT911_RST_BIT);   // RST
+    const uint8_t io1 = (1 << PCA9557_GT911_INT_BIT);   // INT
+
+    // Wire is already begun by ui_init(); don't re-init.
+    if (!i2c_present(PCA9557_I2C_ADDR)) {
+        Serial.printf("[TOUCH] PCA9557 not at 0x%02X — reset skipped\n", PCA9557_I2C_ADDR);
+        return;
+    }
+
+    // "Out.reset()": clear polarity + drive outputs low to a known state.
+    pca9557_write(0x02, 0x00);                 // polarity normal
+    pca9557_write(0x01, 0x00);                 // outputs low
+    // setMode(OUTPUT): make IO0 and IO1 outputs (config bit = 0).
+    pca9557_write(0x03, (uint8_t)~(io0 | io1));
+
+    // IO0 LOW, IO1 LOW  (RST asserted, INT low → selects 0x5D)
+    pca9557_write(0x01, 0x00);
+    delay(20);
+    // IO0 HIGH (release RST) with IO1 still LOW → GT911 latches 0x5D
+    pca9557_write(0x01, io0);
+    delay(100);
+    // IO1 -> INPUT (INT becomes the GT911 interrupt line)
+    pca9557_write(0x03, (uint8_t)~io0);
+    delay(50);                                 // GT911 firmware boot time
+    Serial.printf("[TOUCH] GT911 Elecrow reset sequence done (addr should be 0x5D)\n");
+}
+
+// Returns true if a device ACKs at `addr` on the current Wire bus.
+static bool i2c_present(uint8_t addr) {
+    Wire.beginTransmission(addr);
+    return Wire.endTransmission() == 0;
+}
+
+// One-shot I2C scan.  Uses Serial.printf directly (not ESP_LOG) so the output
+// shows regardless of log level / Serial-init ordering.
+// Look for 0x5D (or 0x14) = GT911 and 0x18 = PCA9557.
+static void i2c_scan_touch_bus() {
+    Serial.printf("[TOUCH] I2C scan on SDA %d / SCL %d:\n", I2C_SDA, I2C_SCL);
+    uint8_t found = 0;
+    for (uint8_t addr = 1; addr < 0x7F; addr++) {
+        Wire.beginTransmission(addr);
+        if (Wire.endTransmission() == 0) {
+            Serial.printf("[TOUCH]   device @ 0x%02X\n", addr);
+            found++;
+        }
+    }
+    if (!found) Serial.printf("[TOUCH]   NO I2C devices found — bus dead (USB PHY? wrong pins?)\n");
+}
 
 // ---- LovyanGFX board configuration -----------------------------------------
 
@@ -75,18 +193,12 @@ public:
             auto cfg            = _touch.config();
             cfg.x_min           = 0;  cfg.x_max = SCREEN_W - 1;
             cfg.y_min           = 0;  cfg.y_max = SCREEN_H - 1;
-            // cfg.pin_int         = TOUCH_INT;
-            // cfg.pin_rst         = TOUCH_RST;
-            // cfg.pin_sda         = I2C_SDA;
-            // cfg.pin_scl         = I2C_SCL;
-            // cfg.i2c_port        = 0;
-            // cfg.i2c_addr        = 0x5D;  // <--- ADD THIS LINE HERE!
-            cfg.pin_int         = -1;     // -1 tells the ESP32 to leave this pin alone!
-            cfg.pin_rst         = -1;     // -1 tells the ESP32 to leave this pin alone!
+            cfg.pin_int         = TOUCH_INT;  // -1: INT is the GT911 addr strap (GPIO 38) — leave it alone
+            cfg.pin_rst         = TOUCH_RST;  // -1: RST released by board pull-up via PCA9557
             cfg.pin_sda         = I2C_SDA;
             cfg.pin_scl         = I2C_SCL;
             cfg.i2c_port        = 0;
-            cfg.i2c_addr        = 0x5D;   // Back to the factory default
+            cfg.i2c_addr        = TOUCH_I2C_ADDR;  // 0x5D default; flip to 0x14 in config if touch is dead
             cfg.freq            = 400000;
             cfg.bus_shared      = false;
             cfg.offset_rotation = 0;
@@ -199,10 +311,39 @@ void ui_set_stop_callback(void (*cb)()) {
     _stop_cb = cb;
 }
 
+void ui_set_incline_callback(void (*cb)(int32_t steps)) {
+    (void)cb;  // no incline buttons on this board's layout
+}
+
 void ui_init() {
     ESP_LOGI(TAG_UI, "PSRAM=%s size=%u heap=%u",
         psramFound() ? "found" : "MISSING",
         (unsigned)ESP.getPsramSize(), (unsigned)ESP.getFreeHeap());
+    // ---- Touch (GT911) bring-up + self-test --------------------------------
+    // ui_init() runs BEFORE setup()'s Serial.begin(), so start Serial here too
+    // (idempotent) and use Serial.printf so the report is always visible on UART0.
+    //
+    // Sequence: bring up the touch I2C bus on GPIO 19/20, run the Elecrow PCA9557
+    // reset so a healthy GT911 boots and latches address 0x5D, then verify it
+    // responds.  If it doesn't, the GT911 panel is absent/defective (confirmed on
+    // this unit: even Elecrow's factory firmware gets no touch) — the rest of the
+    // UI still runs, it just won't receive touch input.
+    Serial.begin(115200);
+    delay(50);
+    Wire.begin(I2C_SDA, I2C_SCL, 400000);
+    gt911_reset_sequence();
+
+    bool touch_ok = i2c_present(TOUCH_I2C_ADDR);
+    if (touch_ok) {
+        Serial.printf("[TOUCH] GT911 detected at 0x%02X — touch enabled\n", TOUCH_I2C_ADDR);
+    } else {
+        Serial.printf("[TOUCH] GT911 NOT responding at 0x%02X (tried PCA9557 reset).\n",
+                      TOUCH_I2C_ADDR);
+        Serial.printf("[TOUCH] Touch unavailable — likely absent/defective panel. "
+                      "Running an I2C scan for reference:\n");
+        i2c_scan_touch_bus();   // shows what IS on the bus (e.g. PCA9557 @ 0x18)
+    }
+
     ESP_LOGI(TAG_UI, "new LGFX...");
     _gfx = new LGFX_DIS08070H();
     ESP_LOGI(TAG_UI, "gfx.init...");

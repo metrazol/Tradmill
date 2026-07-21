@@ -35,6 +35,17 @@ void Treadmill::adjustSpeed(int32_t ticks) {
     _targetSpeedMph = constrain(_targetSpeedMph, 0.0f, MAX_SPEED_MPH);
 }
 
+void Treadmill::adjustIncline(int32_t steps) {
+    if (steps == 0) return;
+    int dir = (steps > 0) ? 1 : -1;
+    int newLevel = constrain(_inclineLevel + dir, MIN_INCLINE_LEVEL, MAX_INCLINE_LEVEL);
+    if (newLevel == _inclineLevel) return;   // already at a limit
+    _inclineLevel       = newLevel;
+    // Pulse the incline relay so the motor physically moves the deck.
+    _inclinePulseDir    = dir;
+    _inclinePulseEndMs  = millis() + INCLINE_DEBOUNCE_MS;
+}
+
 void Treadmill::toggleRunning() {
     if (_stopping) {
         // Cancel the ramp; resume at whatever speed we've ramped down to.
@@ -74,6 +85,9 @@ void Treadmill::update() {
     }
 
     if (!_running) {
+        // Still service incline so on-screen / physical incline buttons work
+        // while the belt is paused.
+        _updateIncline();
         return;
     }
 
@@ -122,17 +136,24 @@ void Treadmill::_updateIncline() {
     bool up   = (MCP_INCLINE_UP_BTN   != -1) && (_mcp.digitalRead(MCP_INCLINE_UP_BTN)   == LOW);
     bool down = (MCP_INCLINE_DOWN_BTN != -1) && (_mcp.digitalRead(MCP_INCLINE_DOWN_BTN) == LOW);
 
-    if (up && !down) {
+    // A UI-driven incline pulse still in progress drives the relay too.
+    bool pulseUp   = (_inclinePulseDir > 0) && (now < _inclinePulseEndMs);
+    bool pulseDown = (_inclinePulseDir < 0) && (now < _inclinePulseEndMs);
+    if (_inclinePulseDir != 0 && now >= _inclinePulseEndMs) {
+        _inclinePulseDir = 0;   // pulse finished
+    }
+
+    if ((up || pulseUp) && !(down || pulseDown)) {
         _mcp.digitalWrite(MCP_INCLINE_UP_PIN,   HIGH);
         _mcp.digitalWrite(MCP_INCLINE_DOWN_PIN, LOW);
-        if (!_lastBtnUp && debounceOk) {
+        if (up && !_lastBtnUp && debounceOk) {   // physical button edge: count a level
             _inclineLevel  = min(_inclineLevel + 1, MAX_INCLINE_LEVEL);
             _lastInclineMs = now;
         }
-    } else if (down && !up) {
+    } else if ((down || pulseDown) && !(up || pulseUp)) {
         _mcp.digitalWrite(MCP_INCLINE_UP_PIN,   LOW);
         _mcp.digitalWrite(MCP_INCLINE_DOWN_PIN, HIGH);
-        if (!_lastBtnDown && debounceOk) {
+        if (down && !_lastBtnDown && debounceOk) {
             _inclineLevel  = max(_inclineLevel - 1, MIN_INCLINE_LEVEL);
             _lastInclineMs = now;
         }

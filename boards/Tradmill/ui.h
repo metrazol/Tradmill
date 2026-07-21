@@ -21,3 +21,9 @@ void ui_set_speed_callback(void (*cb)(int32_t delta));
 //   void onStop() { treadmill.toggleRunning(); }
 // On boards without a touch screen this is a no-op.
 void ui_set_stop_callback(void (*cb)());
+
+// Registers a callback invoked when the on-screen incline ± buttons are tapped
+// (ZX2D80CE02S touch panel only).  `steps` is +1 (incline up) or -1 (down).
+//   void onIncline(int32_t steps) { treadmill.adjustIncline(steps); }
+// On boards without a touch screen this is a no-op.
+void ui_set_incline_callback(void (*cb)(int32_t steps));

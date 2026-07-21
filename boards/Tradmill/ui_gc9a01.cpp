@@ -63,6 +63,10 @@ void ui_set_stop_callback(void (*cb)()) {
     (void)cb;  // no touch screen on this board
 }
 
+void ui_set_incline_callback(void (*cb)(int32_t steps)) {
+    (void)cb;  // no touch screen — incline is button/encoder-only on this board
+}
+
 void ui_init() {
     // Power on display
     pinMode(LCD_EN_PIN, OUTPUT); digitalWrite(LCD_EN_PIN, HIGH);

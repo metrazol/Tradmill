@@ -11,6 +11,11 @@ public:
     // Adjust target speed by `ticks` encoder steps (positive = faster).
     void adjustSpeed(int32_t ticks);
 
+    // Adjust incline by `steps` levels (positive = incline up, negative = down).
+    // Drives the incline relay for a fixed pulse so on-screen buttons work the
+    // same as the physical incline buttons on the MCP23017.
+    void adjustIncline(int32_t steps);
+
     // Toggle between running and paused.  When paused, the motor stops
     // immediately but the target speed is preserved for when it resumes.
     void toggleRunning();
@@ -39,6 +44,10 @@ private:
     bool     _lastBtnUp       = false;
     bool     _lastBtnDown     = false;
     uint32_t _lastInclineMs   = 0;
+
+    // UI-driven incline relay pulse (separate from the held-button logic).
+    int      _inclinePulseDir   = 0;   // -1 down, +1 up, 0 idle
+    uint32_t _inclinePulseEndMs = 0;
 
     // MCP23017 I2C expander carrying incline relays, incline buttons,
     // and the safety key.  Speed PWM stays on a native LEDC GPIO.
