@@ -46,11 +46,12 @@ public:
             cfg.pin_cs        = SCREEN_CS;
             cfg.pin_rst       = SCREEN_RST;
             cfg.pin_busy      = -1;
-            // Panel memory dimensions are always in the native (portrait) axis.
+            // Native ILI9341 dimensions are always 240 wide x 320 tall (portrait).
+            // LovyanGFX applies setRotation() on top of these.
             cfg.memory_width  = 240;  cfg.panel_width  = 240;
             cfg.memory_height = 320;  cfg.panel_height = 320;
             cfg.offset_x      = 0;   cfg.offset_y     = 0;
-            cfg.offset_rotation  = 2;   // ILI9341 on CYD: offset 2 means setRotation(0)=landscape
+            cfg.offset_rotation  = 0;
             cfg.dummy_read_pixel = 8;
             cfg.readable      = true;
             cfg.invert        = false;
@@ -71,8 +72,8 @@ public:
         {
             auto cfg            = _touch.config();
             // Raw XPT2046 ADC range (calibrate per-unit if taps feel offset).
-            cfg.x_min           = 240;   cfg.x_max = 3800;
-            cfg.y_min           = 3700;  cfg.y_max = 200;   // y is inverted on CYD
+            cfg.x_min           = 3700;   cfg.x_max = 200;
+            cfg.y_min           = 200;  cfg.y_max = 3700;   // y is inverted on CYD
             cfg.pin_int         = TOUCH_IRQ;
             cfg.bus_shared      = false;
             cfg.offset_rotation = 0;    // touch coords already match panel offset_rotation=2
@@ -140,14 +141,24 @@ static lv_obj_t *_lbl_safety;
 #define ARC_MAX    ((int16_t)(MAX_SPEED_MPH * 10.0f))
 
 // Layout constants (landscape 320×240, all in pixels).
-// Left column: arc + labels.  Right column: speed buttons (top) + incline (bottom).
-// Bottom strip: start/stop.
+// Left column (0..159):  arc + labels.
+// Right column (160..319): speed buttons top half, incline bottom half.
+// Bottom strip (y=208..239): start/stop full width.
 #define COL_SPLIT   160   // x where right column begins
 #define BTN_W       150   // right-column button width
-#define BTN_X       (COL_SPLIT + 5)  // right-column button left edge
-#define ARC_SIZE    190   // arc widget size (square)
+#define BTN_X       (COL_SPLIT + 5)  // right-column button left edge (165)
+#define ARC_SIZE    190   // arc widget size (square bounding box)
 #define BOTTOM_Y    208   // y of start/stop strip
 #define STOP_H       28   // start/stop button height
+// Right-column speed buttons (top half: y 0..119)
+#define SPEED_BTN_H  52
+#define SPEED_BTN1_Y  4
+#define SPEED_BTN2_Y 60
+// Right-column incline controls (bottom half: y 120..207)
+#define INC_BTN_H    34
+#define INC_UP_Y    122
+#define INC_LBL_Y   159
+#define INC_DN_Y    172
 
 static void (*_speed_cb)(int32_t delta)    = nullptr;
 static void (*_stop_cb)()                  = nullptr;
@@ -182,7 +193,7 @@ static void btn_incline_cb(lv_event_t *e) {
 static lv_obj_t *make_speed_btn(lv_obj_t *scr, const char *label,
                                  int32_t y, int32_t delta) {
     lv_obj_t *btn = lv_btn_create(scr);
-    lv_obj_set_size(btn, BTN_W, 50);
+    lv_obj_set_size(btn, BTN_W, SPEED_BTN_H);
     lv_obj_set_pos(btn, BTN_X, y);
     lv_obj_set_style_bg_color(btn, lv_color_hex(0x1E6FCC), 0);
     lv_obj_set_style_bg_color(btn, lv_color_hex(0x0A4A99), LV_STATE_PRESSED);
@@ -200,7 +211,7 @@ static lv_obj_t *make_speed_btn(lv_obj_t *scr, const char *label,
 static lv_obj_t *make_incline_btn(lv_obj_t *scr, const char *label,
                                    int32_t y, int32_t steps) {
     lv_obj_t *btn = lv_btn_create(scr);
-    lv_obj_set_size(btn, BTN_W, 40);
+    lv_obj_set_size(btn, BTN_W, INC_BTN_H);
     lv_obj_set_pos(btn, BTN_X, y);
     lv_obj_set_style_bg_color(btn, lv_color_hex(0xCC8A1E), 0);
     lv_obj_set_style_bg_color(btn, lv_color_hex(0x99641A), LV_STATE_PRESSED);
@@ -231,7 +242,9 @@ void ui_set_incline_callback(void (*cb)(int32_t steps)) { _incline_cb = cb; }
 
 void ui_init() {
     _gfx.init();
-    _gfx.setRotation(0);        // landscape — panel offset_rotation=2 makes 0=landscape on CYD
+    // ILI9341 on CYD: setRotation(1) = landscape, USB on right.
+    // If still mirrored after flash, change to setRotation(3).
+    _gfx.setRotation(1);
     _gfx.fillScreen(TFT_BLACK);
 
     lv_init();
@@ -290,26 +303,23 @@ void ui_init() {
     lv_label_set_text(_lbl_time, "00:00");
     lv_obj_set_pos(_lbl_time, 8, BOTTOM_Y + 6);
 
-    // ---- Right column top: speed buttons ------------------------------------
-    // Fast + at y=8, Slow - at y=66 (50px button + 8px gap).
-    _btn_fast = make_speed_btn(scr, "Fast +",  8,  1);
-    _btn_slow = make_speed_btn(scr, "Slow -", 66, -1);
+    // ---- Right column top: speed buttons (y 0..119) -------------------------
+    _btn_fast = make_speed_btn(scr, "Fast +", SPEED_BTN1_Y,  1);
+    _btn_slow = make_speed_btn(scr, "Slow -", SPEED_BTN2_Y, -1);
 
-    // ---- Right column bottom: incline controls ------------------------------
-    // Divider sits at y=120 (midpoint of 240px).
-    // Incline + at y=122, label at y=168, Incline - at y=192.
-    _btn_inc_up = make_incline_btn(scr, "Incline +", 122,  1);
+    // ---- Right column bottom: incline controls (y 120..207) -----------------
+    // Incline+ (y=122, h=34), label (y=159), Incline- (y=172, h=34) → bottom=206.
+    _btn_inc_up = make_incline_btn(scr, "Incline +", INC_UP_Y,  1);
 
     _lbl_incline = lv_label_create(scr);
     lv_obj_set_style_text_font(_lbl_incline, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(_lbl_incline, lv_color_hex(0xFFCC00), 0);
     lv_obj_set_style_text_align(_lbl_incline, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(_lbl_incline, "0");
-    // Centre the label horizontally in the right column.
-    lv_obj_set_pos(_lbl_incline, BTN_X, 166);
+    lv_obj_set_pos(_lbl_incline, BTN_X, INC_LBL_Y);
     lv_obj_set_width(_lbl_incline, BTN_W);
 
-    _btn_inc_down = make_incline_btn(scr, "Incline -", 196, -1);
+    _btn_inc_down = make_incline_btn(scr, "Incline -", INC_DN_Y, -1);
 
     // ---- Bottom strip: start/stop -------------------------------------------
     _btn_stop = lv_btn_create(scr);

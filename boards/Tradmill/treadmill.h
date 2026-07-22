@@ -51,7 +51,10 @@ private:
 
     // MCP23017 I2C expander carrying incline relays, incline buttons,
     // and the safety key.  Speed PWM stays on a native LEDC GPIO.
+    // _mcpOk is false when the expander doesn't respond at begin() time
+    // (e.g. during bench testing without hardware connected).
     Adafruit_MCP23X17 _mcp;
+    bool              _mcpOk = false;
 
     void _applySpeed();
     void _updateIncline();
