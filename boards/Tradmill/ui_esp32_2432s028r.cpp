@@ -50,7 +50,8 @@ public:
             cfg.memory_width  = 240;  cfg.panel_width  = 240;
             cfg.memory_height = 320;  cfg.panel_height = 320;
             cfg.offset_x      = 0;   cfg.offset_y     = 0;
-            cfg.offset_rotation = 0;
+            cfg.offset_rotation  = 2;   // ILI9341 on CYD: offset 2 means setRotation(0)=landscape
+            cfg.dummy_read_pixel = 8;
             cfg.readable      = true;
             cfg.invert        = false;
             cfg.rgb_order     = false;
@@ -70,13 +71,12 @@ public:
         {
             auto cfg            = _touch.config();
             // Raw XPT2046 ADC range (calibrate per-unit if taps feel offset).
-            cfg.x_min           = 300;   cfg.x_max = 3900;
-            cfg.y_min           = 200;   cfg.y_max = 3700;
+            cfg.x_min           = 240;   cfg.x_max = 3800;
+            cfg.y_min           = 3700;  cfg.y_max = 200;   // y is inverted on CYD
             cfg.pin_int         = TOUCH_IRQ;
             cfg.bus_shared      = false;
-            // offset_rotation 2 maps raw touch axes to match setRotation(3).
-            cfg.offset_rotation = 2;
-            cfg.spi_host        = VSPI_HOST;   // touch on its OWN SPI bus
+            cfg.offset_rotation = 0;    // touch coords already match panel offset_rotation=2
+            cfg.spi_host        = -1;   // let LovyanGFX assign the SPI host
             cfg.freq            = 1000000;
             cfg.pin_sclk        = TOUCH_SCLK;
             cfg.pin_mosi        = TOUCH_MOSI;
@@ -231,7 +231,7 @@ void ui_set_incline_callback(void (*cb)(int32_t steps)) { _incline_cb = cb; }
 
 void ui_init() {
     _gfx.init();
-    _gfx.setRotation(3);        // landscape, USB connector on the right
+    _gfx.setRotation(0);        // landscape — panel offset_rotation=2 makes 0=landscape on CYD
     _gfx.fillScreen(TFT_BLACK);
 
     lv_init();
