@@ -25,8 +25,38 @@
 #define SCREEN_DC     2
 #define SCREEN_RST   -1   // tied to the board reset line
 #define SCREEN_BL    21   // PWM backlight — drive HIGH for full brightness
-#define SCREEN_W    320   // landscape
-#define SCREEN_H    240   // landscape
+#define SCREEN_W    240   // portrait  (board mounted rotated: USB-C on top)
+#define SCREEN_H    320   // portrait
+
+// ---- Display rotation / colour -------------------------------------------------
+// VERIFIED on THIS board (ILI9341 clone, RDDID 0x10 0x10 0x81): the panel's GRAM
+// is natively LANDSCAPE 320x240 (NOT the 240x320 portrait a standard CYD uses).
+// That is configured in ui_esp32_2432s028r.cpp (memory/panel = 320x240,
+// offset_rotation=0).
+//
+// The board is mounted ROTATED 90° COUNTER-CLOCKWISE (viewed from the front) so
+// the USB-C port sits on TOP.  The rotation sweep (old position) showed
+// setRotation(4) = upright landscape with USB on the right; stepping one more
+// 90° (setRotation(5)) compensates the physical rotation and yields a full
+// upright PORTRAIT 240x320 with USB-C on top.
+// The stored XPT2046 affine and touch offset_rotation=4 stay valid: the display
+// rotation-4→5 change makes convertRawXY apply a rotation-1 step, which remaps
+// the affine output (u,v) → (v, 319-u) into the portrait frame.
+// Effective internal rotation = (LCD_ROTATION + offset_rotation) % 8 = 5.
+#ifndef LCD_ROTATION
+#define LCD_ROTATION       5
+#endif
+// ILI9341 colour order.  false = RGB wire order (the CYD works with this).
+#ifndef LCD_BGR_ORDER
+#define LCD_BGR_ORDER     false
+#endif
+
+// Rotation sweep history (TEST_MARKERS=1) on this board (board held flat, USB right):
+//   Phase A (240x320 GRAM, offset_rotation=7) → 4 upright-but-clipped,
+//     6 full-but-mirrored, 1 full-but-left-of-centre  ✗
+//   Phase B (320x240 GRAM, offset_rotation=0)   → B4 PERFECT: full-screen,
+//     landscape, upright, USB-C on the right  ✓  (B5 close, B7 portrait)
+// Final: 320x240 native-landscape GRAM + LCD_ROTATION=5 (mounted portrait, USB on top).
 
 // ---- Touch controller (XPT2046 resistive, via SPI / VSPI) ----
 #define TOUCH_SCLK   25

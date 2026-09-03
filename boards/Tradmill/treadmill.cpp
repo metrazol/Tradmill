@@ -1,18 +1,16 @@
 #include "treadmill.h"
 #include "config.h"
+#include <esp32-hal-ledc.h>
 
 // PWM full-scale duty value derived from the board's configured resolution.
 // uint32_t covers both 8-bit (GC9A01, max 255) and 13-bit (ZX2D80CE02S, max 8191).
 static const uint32_t MAX_DUTY = (1u << PWM_RESOLUTION) - 1u;
 
-// Define a PWM channel for the ESP32 Core v2 API
-static const uint8_t PWM_CHANNEL = 0;
-
 void Treadmill::begin() {
-    // v2 API: setup channel, attach pin to channel, write to channel
-    ledcSetup(PWM_CHANNEL, PWM_FREQ_HZ, PWM_RESOLUTION);
-    ledcAttachPin(SPEED_PIN, PWM_CHANNEL);
-    ledcWrite(PWM_CHANNEL, 0);
+    // ESP32 Arduino core v3 API: single call attaches the pin and configures
+    // frequency + resolution in one shot.  Use pin directly for ledcWrite().
+    ledcAttach(SPEED_PIN, PWM_FREQ_HZ, PWM_RESOLUTION);
+    ledcWrite(SPEED_PIN, 0);
 
     // MCP23017 on its own I2C bus (Wire1), separate from any display/touch bus.
     Wire1.begin(MCP_I2C_SDA, MCP_I2C_SCL);
@@ -57,7 +55,7 @@ void Treadmill::toggleRunning() {
     } else if (_running) {
         if (_targetSpeedMph < 0.01f) {
             // Already at zero — stop immediately.
-            ledcWrite(PWM_CHANNEL, 0);
+            ledcWrite(SPEED_PIN, 0);
             _running = false;
         } else {
             _stopping        = true;
@@ -126,11 +124,11 @@ void Treadmill::update() {
 void Treadmill::_applySpeed() {
     _speedMph = _targetSpeedMph;
     if (_speedMph < 0.01f) {
-        ledcWrite(PWM_CHANNEL, 0);
+        ledcWrite(SPEED_PIN, 0);
         return;
     }
     uint32_t duty = (uint32_t)((_speedMph / MAX_SPEED_MPH) * MAX_DUTY_PCT * MAX_DUTY);
-    ledcWrite(PWM_CHANNEL, duty);
+    ledcWrite(SPEED_PIN, duty);
 }
 
 void Treadmill::_updateIncline() {
@@ -173,7 +171,7 @@ void Treadmill::_updateIncline() {
 }
 
 void Treadmill::_stopAll() {
-    ledcWrite(PWM_CHANNEL, 0);
+    ledcWrite(SPEED_PIN, 0);
     if (_mcpOk) {
         _mcp.digitalWrite(MCP_INCLINE_UP_PIN,   LOW);
         _mcp.digitalWrite(MCP_INCLINE_DOWN_PIN, LOW);

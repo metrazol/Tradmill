@@ -1,0 +1,8 @@
+smbus2
+lgpio
+spidev
+luma.lcd
+Pillow
+adafruit-circuitpython-ads1x15
+adafruit-blinka
+requests

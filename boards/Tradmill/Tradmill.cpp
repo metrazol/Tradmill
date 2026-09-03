@@ -1,8 +1,8 @@
 // ============================================================
-// Tradmill — shared Arduino sketch
+// Tradmill — main entry point (setup / loop)
 // Board is selected in board_select.h.  This file contains no
 // board-specific code; all display and hardware differences live
-// in config.h, ui_gc9a01.cpp, and ui_zx2d80ce02s.cpp.
+// in config_*.h and the matching ui_*.cpp file.
 // ============================================================
 
 #define FIRMWARE_VERSION "1.0.17"

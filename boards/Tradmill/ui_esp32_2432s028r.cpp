@@ -2,10 +2,17 @@
 #ifdef BOARD_ESP32_2432S028R
 // ============================================================
 // Display + UI implementation for AITRIP / Sunton ESP32-2432S028R (CYD)
-// (320x240 landscape, ILI9341 via SPI + XPT2046 resistive touch via VSPI)
+// (240x320 PORTRAIT, ILI9341 via SPI + XPT2046 resistive touch via VSPI)
 //
-// Rotation 3: landscape, USB connector on the right.
-// Touch offset_rotation 2: maps raw XPT2046 coords to match rotation 3.
+// Rotation: VERIFIED this panel's GRAM is natively LANDSCAPE 320x240.  Configured
+//   as memory/panel 320x240 with offset_rotation=0.  The board is MOUNTED with
+//   the USB-C port on TOP; LCD_ROTATION=5 renders an upright 240x320 portrait.
+//   (Rotation 4 was the upright landscape with USB on the right; rotation 5 is
+//   one 90° step further, compensating the physical rotation — see config header.)
+// Touch:  XPT2046 calibration below; touch offset_rotation=4 keeps the effective
+//   touch rotation at 0 so convertRawXY applies the stored affine, then its
+//   rotation-1 step remaps the affine output (u,v) → (v, 319-u) to the portrait frame.
+// Build with -D TEST_MARKERS=1 to re-run the diagnostic sweep / tag confirmation.
 // ============================================================
 
 #include <Arduino.h>
@@ -13,6 +20,12 @@
 #include <LovyanGFX.hpp>
 #include "config.h"
 #include "ui.h"
+
+// Diagnostic screen for picking rotation/colour.  Set via build flag:
+//   pio run -e esp32_2432s028r -D TEST_MARKERS=1
+#ifndef TEST_MARKERS
+#define TEST_MARKERS 0
+#endif
 
 // ---- LovyanGFX board configuration -----------------------------------------
 // The CYD wires the display and the touch controller to TWO different SPI
@@ -29,7 +42,7 @@ public:
             auto cfg        = _bus.config();
             cfg.spi_host    = HSPI_HOST;
             cfg.spi_mode    = 0;
-            cfg.freq_write  = 40000000;
+            cfg.freq_write  = 40000000;  // 40 MHz — matches reference; drop if artifacts
             cfg.freq_read   = 16000000;
             cfg.spi_3wire   = false;
             cfg.use_lock    = true;
@@ -46,18 +59,22 @@ public:
             cfg.pin_cs        = SCREEN_CS;
             cfg.pin_rst       = SCREEN_RST;
             cfg.pin_busy      = -1;
-            // Native ILI9341 dimensions are always 240 wide x 320 tall (portrait).
-            // LovyanGFX applies setRotation() on top of these.
-            cfg.memory_width  = 240;  cfg.panel_width  = 240;
-            cfg.memory_height = 320;  cfg.panel_height = 320;
+            // VERIFIED on this board (clone): the GRAM is natively LANDSCAPE
+            // 320x240.  Phase-B sweep confirmed setRotation(4) gave a full-screen,
+            // upright landscape with USB on the right.  The board is now mounted
+            // rotated 90° CCW (USB on top), so LCD_ROTATION=5 shows an upright
+            // 240x320 portrait read from the same 320x240 GRAM.
+            cfg.memory_width  = 320;  cfg.panel_width  = 320;
+            cfg.memory_height = 240;  cfg.panel_height = 240;
             cfg.offset_x      = 0;   cfg.offset_y     = 0;
-            cfg.offset_rotation  = 0;
-            cfg.dummy_read_pixel = 8;
-            cfg.readable      = true;
-            cfg.invert        = false;
-            cfg.rgb_order     = false;
-            cfg.dlen_16bit    = false;
-            cfg.bus_shared    = false;
+            cfg.offset_rotation   = 0;
+            cfg.bus_shared        = false;
+            cfg.dummy_read_pixel  = 8;
+            cfg.dummy_read_bits   = 1;
+            cfg.readable          = true;
+            cfg.invert            = false;
+            cfg.rgb_order         = false;
+            cfg.dlen_16bit        = false;
             _panel.config(cfg);
         }
         {
@@ -71,12 +88,14 @@ public:
         }
         {
             auto cfg            = _touch.config();
-            // Raw XPT2046 ADC range (calibrate per-unit if taps feel offset).
-            cfg.x_min           = 3700;   cfg.x_max = 200;
-            cfg.y_min           = 200;  cfg.y_max = 3700;   // y is inverted on CYD
+            // Coarse defaults — overridden at boot by the baked full-affine
+            // calibration below. offset_rotation=4 cancels the display's
+            // rotation-4 axis flip, so convertRawXY applies only the affine.
+            cfg.x_min           = 300;  cfg.x_max = 3900;
+            cfg.y_min           = 200;  cfg.y_max = 3700;
             cfg.pin_int         = TOUCH_IRQ;
             cfg.bus_shared      = false;
-            cfg.offset_rotation = 0;    // touch coords already match panel offset_rotation=2
+            cfg.offset_rotation = 4;    // neutralize display rotation-4 axis flip
             cfg.spi_host        = -1;   // let LovyanGFX assign the SPI host
             cfg.freq            = 1000000;
             cfg.pin_sclk        = TOUCH_SCLK;
@@ -88,6 +107,13 @@ public:
         }
         setPanel(&_panel);
     }
+
+    // Read the panel/driver ID over the SPI bus (MIPI RDDID / 0x04).
+    // ILI9341 reports 0x00 0x93 0x41; ST7789 typically 0x00 0x85 0x85.
+    // `_panel.readCommand` is public on Panel_LCD so this compiles from here.
+    uint32_t readPanelID() {
+        return _panel.readCommand(0x04, 0, 3);
+    }
 };
 
 static LGFX_ESP32_2432S028R _gfx;
@@ -95,7 +121,7 @@ static LGFX_ESP32_2432S028R _gfx;
 // ---- LVGL glue --------------------------------------------------------------
 
 static lv_disp_draw_buf_t _draw_buf;
-// Buffers sized for landscape width (320) × 10 rows.
+// Buffers sized for portrait width (240) × 10 rows.
 static lv_color_t _buf1[SCREEN_W * 10];
 static lv_color_t _buf2[SCREEN_W * 10];
 
@@ -115,6 +141,9 @@ static void touch_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
         data->point.x = x;
         data->point.y = y;
         data->state   = LV_INDEV_STATE_PR;
+        static uint32_t tdbg = 0;
+        uint32_t now = millis();
+        if (now - tdbg > 250) { tdbg = now; Serial.printf("[APP] touch=(%u,%u)\n", (unsigned)x, (unsigned)y); }
     } else {
         data->state = LV_INDEV_STATE_REL;
     }
@@ -140,31 +169,32 @@ static lv_obj_t *_lbl_safety;
 #define ARC_END     30
 #define ARC_MAX    ((int16_t)(MAX_SPEED_MPH * 10.0f))
 
-// Layout constants (landscape 320×240, all in pixels).
-// Left column (0..159):  arc + labels.
-// Right column (160..319): speed buttons top half, incline bottom half.
-// Bottom strip (y=208..239): start/stop full width.
-#define COL_SPLIT   160   // x where right column begins
-#define BTN_W       150   // right-column button width
-#define BTN_X       (COL_SPLIT + 5)  // right-column button left edge (165)
-#define ARC_SIZE    190   // arc widget size (square bounding box)
-#define BOTTOM_Y    208   // y of start/stop strip
-#define STOP_H       28   // start/stop button height
-// Right-column speed buttons (top half: y 0..119)
-#define SPEED_BTN_H  52
-#define SPEED_BTN1_Y  4
-#define SPEED_BTN2_Y 60
-// Right-column incline controls (bottom half: y 120..207)
-#define INC_BTN_H    34
-#define INC_UP_Y    122
-#define INC_LBL_Y   159
-#define INC_DN_Y    172
+// Layout constants (portrait 240×320, all in pixels).
+// Top:  shrunken speed arc + readouts (speed, unit, time, incline level).
+// Mid:  speed buttons (Fast+/Slow-) and incline buttons (Incline+/Incline-)
+//       as two full-width 2-up rows — the largest the portrait panel allows.
+// Bottom: start/stop strip across the full width.
+#define MARGIN        6
+#define GAP           4
+#define BTN_W         ((SCREEN_W - 2 * MARGIN - GAP) / 2)  // 112
+#define BTN_X_L       MARGIN                               // 6
+#define BTN_X_R       (BTN_X_L + BTN_W + GAP)              // 122
+#define BTN_H         58
+#define ARC_SIZE      140   // shrunken speed gauge (was 190)
+#define ARC_X         ((SCREEN_W - ARC_SIZE) / 2)          // 50
+#define ARC_Y         2
+#define SPEED_BTN_Y   156
+#define INC_BTN_Y     220
+#define STOP_X        MARGIN
+#define STOP_Y        284
+#define STOP_W        (SCREEN_W - 2 * MARGIN)              // 228
+#define STOP_H        32
 
 static void (*_speed_cb)(int32_t delta)    = nullptr;
 static void (*_stop_cb)()                  = nullptr;
 static void (*_incline_cb)(int32_t steps)  = nullptr;
 
-// Track running state to avoid unconditional redraws every 250ms.
+// Track running state to avoid unconditional redraws every 250 ms.
 static bool _last_running = true;   // inverted so first call always writes
 
 // ---- Button callbacks -------------------------------------------------------
@@ -189,12 +219,12 @@ static void btn_incline_cb(lv_event_t *e) {
 
 // ---- Widget factory helpers -------------------------------------------------
 
-// Right-column speed button (blue).
+// Full-width-row speed button (blue).
 static lv_obj_t *make_speed_btn(lv_obj_t *scr, const char *label,
-                                 int32_t y, int32_t delta) {
+                                 int32_t x, int32_t y, int32_t delta) {
     lv_obj_t *btn = lv_btn_create(scr);
-    lv_obj_set_size(btn, BTN_W, SPEED_BTN_H);
-    lv_obj_set_pos(btn, BTN_X, y);
+    lv_obj_set_size(btn, BTN_W, BTN_H);
+    lv_obj_set_pos(btn, x, y);
     lv_obj_set_style_bg_color(btn, lv_color_hex(0x1E6FCC), 0);
     lv_obj_set_style_bg_color(btn, lv_color_hex(0x0A4A99), LV_STATE_PRESSED);
     lv_obj_set_style_radius(btn, 8, 0);
@@ -207,12 +237,12 @@ static lv_obj_t *make_speed_btn(lv_obj_t *scr, const char *label,
     return btn;
 }
 
-// Right-column incline button (amber).
+// Full-width-row incline button (amber).
 static lv_obj_t *make_incline_btn(lv_obj_t *scr, const char *label,
-                                   int32_t y, int32_t steps) {
+                                   int32_t x, int32_t y, int32_t steps) {
     lv_obj_t *btn = lv_btn_create(scr);
-    lv_obj_set_size(btn, BTN_W, INC_BTN_H);
-    lv_obj_set_pos(btn, BTN_X, y);
+    lv_obj_set_size(btn, BTN_W, BTN_H);
+    lv_obj_set_pos(btn, x, y);
     lv_obj_set_style_bg_color(btn, lv_color_hex(0xCC8A1E), 0);
     lv_obj_set_style_bg_color(btn, lv_color_hex(0x99641A), LV_STATE_PRESSED);
     lv_obj_set_style_radius(btn, 8, 0);
@@ -240,20 +270,149 @@ void ui_set_speed_callback(void (*cb)(int32_t delta)) { _speed_cb = cb; }
 void ui_set_stop_callback(void (*cb)())               { _stop_cb  = cb; }
 void ui_set_incline_callback(void (*cb)(int32_t steps)) { _incline_cb = cb; }
 
+// ---- Diagnostic probe (TEST_MARKERS) -----------------------------------------
+
+#if TEST_MARKERS
+// Pure-hardware probe — no LVGL at all.  Geometry is now FIXED in the class
+// constructor (320x240 native-landscape GRAM, offset_rotation=0, verified via
+// the earlier A/B sweep).  This just confirms the locked LCD_ROTATION and prints
+// the panel RDDID so a fresh board can be sanity-checked.
+// Build:
+//   pio run -e esp32_2432s028r -D TEST_MARKERS=1 -t upload
+// On screen: TOP edge 20px colour ruler (width), LEFT 20px grey ruler (height),
+//   a crosshair, and the rotation digit LCD_ROTATION drawn huge in the centre.
+static uint16_t ruler_top_color(int i) {
+    static const uint16_t pal[8] = {
+        0x0000, 0x001F, 0x07E0, 0x07FF, 0xF800, 0xF81F, 0xFFE0, 0xFFFF
+    };
+    return pal[i & 7];
+}
+static uint16_t ruler_left_color(int i) {
+    static const uint16_t grey[8] = {
+        0x0000, 0x2104, 0x4208, 0x630C, 0x8410, 0xA534, 0xC618, 0xFFFF
+    };
+    return grey[i & 7];
+}
+static void draw_rulers(int w, int h) {
+    for (int i = 0, x = 0; x < w; i++, x += 20)
+        _gfx.fillRect(x, 0, 20, 4, ruler_top_color(i));
+    for (int i = 0, y = 0; y < h; i++, y += 20)
+        _gfx.fillRect(0, y, 4, 20, ruler_left_color(i));
+}
+static void confirm_frame(uint8_t r) {
+    _gfx.setRotation(r);
+    int w = _gfx.width();
+    int h = _gfx.height();
+
+    _gfx.fillScreen(lgfx::rgb565_t(24 + r * 16, 255u - r * 8u, r * 40));
+    draw_rulers(w, h);
+
+    _gfx.drawLine(0, h / 2, w, h / 2, lgfx::rgb565_t(255, 255, 255));
+    _gfx.drawLine(w / 2, 0, w / 2, h, lgfx::rgb565_t(255, 255, 255));
+
+    _gfx.setFont(&lgfx::fonts::Font0);
+    _gfx.setTextColor(0x0000u);   // black
+    _gfx.setTextDatum(lgfx::middle_center);
+    _gfx.setTextSize(6);
+    _gfx.drawNumber(r, w / 2, h / 2);
+}
+
+static void probe_screen() {
+    Serial.begin(115200);  // may run before setup(); idempotent
+    Serial.println();
+    Serial.println("[PROBE] Physical-corner touch calibration.");
+    Serial.println("[PROBE] A crosshair appears at each corner; tap+hold it precisely.");
+    Serial.println("[PROBE] Order: TL -> BL -> TR -> BR. Raw is 16-sample averaged.");
+
+    _gfx.setRotation(LCD_ROTATION);
+    int w = _gfx.width();
+    int h = _gfx.height();
+
+    const int cx[4] = { 4,  4, w - 5, w - 5 };
+    const int cy[4] = { 4,  h - 5, 4,   h - 5 };
+    const char *nm[4] = { "TL", "BL", "TR", "BR" };
+    static const int _RAWERR = 20;
+
+    for (int i = 0; i < 4; ++i) {
+        _gfx.fillScreen(lgfx::rgb565_t(40, 40, 40));
+        _gfx.setFont(&lgfx::fonts::Font0);
+        _gfx.setTextColor(0xFFFFu);
+        _gfx.setTextDatum(lgfx::middle_center);
+        _gfx.setTextSize(2);
+        _gfx.drawString(nm[i], cx[i], cy[i] - 40);
+        _gfx.drawLine(cx[i] - 30, cy[i], cx[i] + 30, cy[i], 0xF800u);
+        _gfx.drawLine(cx[i], cy[i] - 40, cx[i], cy[i] + 30, 0xF800u);
+
+        int32_t ax = 0, ay = 0;
+        bool captured = false;
+        while (!captured) {
+            lgfx::v1::touch_point_t tp, tp2;
+            do { delay(2); } while (!_gfx.getTouchRaw(&tp));
+            delay(12);
+            if (!_gfx.getTouchRaw(&tp2)) continue;
+            if (abs(tp.x - tp2.x) > _RAWERR || abs(tp.y - tp2.y) > _RAWERR) continue;
+
+            long sx = tp.x + tp2.x, sy = tp.y + tp2.y;
+            bool ok = true;
+            for (int j = 0; j < 7; ++j) {
+                int32_t a, b, c, d;
+                if (!_gfx.getTouchRaw(&a, &b)) { ok = false; break; }
+                delay(12);
+                if (!_gfx.getTouchRaw(&c, &d)) { ok = false; break; }
+                if (abs(a - c) > _RAWERR || abs(b - d) > _RAWERR) { ok = false; break; }
+                sx += a + c; sy += b + d;
+            }
+            if (!ok) { delay(40); continue; }
+            ax = (int32_t)(sx >> 4);
+            ay = (int32_t)(sy >> 4);
+            captured = true;
+            Serial.printf("[PHY] %s raw=(%4d,%4d)\n", nm[i], (int)ax, (int)ay);
+            do { delay(4); } while (_gfx.getTouchRaw(&tp));
+        }
+    }
+    Serial.println("[PHY] Capture done. Paste the four raw= values into s_touch_cal.");
+
+    while (true) { delay(10000); }
+}
+#endif // TEST_MARKERS
+
+// ---- Public interface -------------------------------------------------------
+
 void ui_init() {
     _gfx.init();
-    // ILI9341 on CYD: setRotation(1) = landscape, USB on right.
-    // If still mirrored after flash, change to setRotation(3).
-    _gfx.setRotation(1);
+    _gfx.setRotation(LCD_ROTATION);
     _gfx.fillScreen(TFT_BLACK);
+
+#if TEST_MARKERS
+    probe_screen();
+    return;
+#endif
+
+    // ---- Touch calibration (stored affine) ----
+    // Raw XPT2046 readings measured at the four PHYSICAL display corners with a
+    // precise on-screen crosshair (rotation-4 landscape frame). The sensor is
+    // mounted rotated ~90 deg (raw_x ~ vertical, raw_y ~ horizontal), so the
+    // full 4-corner affine is required — an axis-aligned min/max range cannot
+    // represent it. With touch offset_rotation=4 the display's rotation-5 axis
+    // flip is cancelled (r -> 1 in convertRawXY) so the stored affine is applied
+    // in the rotation-0 frame, then the r=1 step remaps it into the current
+    // portrait frame: (u,v) -> (v, 319-u).  This stays valid for the USB-on-top
+    // mounting because the panel and the touch sensor rotate together.
+    static const uint16_t s_touch_cal[8] = {
+        524, 488,    // TL (0,0)
+        3302, 412,   // BL (0,h-1)
+        627, 3650,   // TR (w-1,0)
+        3473, 3630,  // BR (w-1,h-1)
+    };
+    _gfx.setTouchCalibrate((uint16_t *)s_touch_cal);
 
     lv_init();
     lv_disp_draw_buf_init(&_draw_buf, _buf1, _buf2, SCREEN_W * 10);
 
     static lv_disp_drv_t disp_drv;
     lv_disp_drv_init(&disp_drv);
-    disp_drv.hor_res  = SCREEN_W;   // 320
-    disp_drv.ver_res  = SCREEN_H;   // 240
+    disp_drv.hor_res  = SCREEN_W;   // 240
+    disp_drv.ver_res  = SCREEN_H;   // 320
     disp_drv.flush_cb = disp_flush;
     disp_drv.draw_buf = &_draw_buf;
     lv_disp_drv_register(&disp_drv);
@@ -267,11 +426,10 @@ void ui_init() {
     lv_obj_t *scr = lv_scr_act();
     lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
 
-    // ---- Left column: speed arc ---------------------------------------------
-    // Arc centred vertically in the left 160px.
+    // ---- Top: shrunken speed arc + readouts ----------------------------------
     _arc = lv_arc_create(scr);
     lv_obj_set_size(_arc, ARC_SIZE, ARC_SIZE);
-    lv_obj_set_pos(_arc, (COL_SPLIT - ARC_SIZE) / 2, (SCREEN_H - ARC_SIZE) / 2);
+    lv_obj_set_pos(_arc, ARC_X, ARC_Y);
     lv_arc_set_range(_arc, 0, ARC_MAX);
     lv_arc_set_bg_angles(_arc, ARC_START, ARC_END);
     lv_arc_set_value(_arc, 0);
@@ -287,7 +445,7 @@ void ui_init() {
     lv_obj_set_style_text_font(_lbl_speed, &lv_font_montserrat_48, 0);
     lv_obj_set_style_text_color(_lbl_speed, lv_color_white(), 0);
     lv_label_set_text(_lbl_speed, "0.0");
-    lv_obj_align_to(_lbl_speed, _arc, LV_ALIGN_CENTER, 0, -8);
+    lv_obj_align_to(_lbl_speed, _arc, LV_ALIGN_CENTER, 0, -6);
 
     // Unit label below speed value.
     _lbl_unit = lv_label_create(scr);
@@ -296,35 +454,33 @@ void ui_init() {
     lv_label_set_text(_lbl_unit, "mph");
     lv_obj_align_to(_lbl_unit, _lbl_speed, LV_ALIGN_OUT_BOTTOM_MID, 0, 2);
 
-    // Elapsed time bottom-left.
+    // Elapsed time in the arc's open bottom gap.
     _lbl_time = lv_label_create(scr);
     lv_obj_set_style_text_font(_lbl_time, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(_lbl_time, lv_color_hex(0xAAAAAA), 0);
     lv_label_set_text(_lbl_time, "00:00");
-    lv_obj_set_pos(_lbl_time, 8, BOTTOM_Y + 6);
+    lv_obj_align_to(_lbl_time, _arc, LV_ALIGN_CENTER, 0, 36);
 
-    // ---- Right column top: speed buttons (y 0..119) -------------------------
-    _btn_fast = make_speed_btn(scr, "Fast +", SPEED_BTN1_Y,  1);
-    _btn_slow = make_speed_btn(scr, "Slow -", SPEED_BTN2_Y, -1);
-
-    // ---- Right column bottom: incline controls (y 120..207) -----------------
-    // Incline+ (y=122, h=34), label (y=159), Incline- (y=172, h=34) → bottom=206.
-    _btn_inc_up = make_incline_btn(scr, "Incline +", INC_UP_Y,  1);
-
+    // Incline level readout, same open bottom gap.
     _lbl_incline = lv_label_create(scr);
     lv_obj_set_style_text_font(_lbl_incline, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(_lbl_incline, lv_color_hex(0xFFCC00), 0);
     lv_obj_set_style_text_align(_lbl_incline, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_text(_lbl_incline, "0");
-    lv_obj_set_pos(_lbl_incline, BTN_X, INC_LBL_Y);
-    lv_obj_set_width(_lbl_incline, BTN_W);
+    lv_label_set_text(_lbl_incline, "Incline 0");
+    lv_obj_align_to(_lbl_incline, _arc, LV_ALIGN_CENTER, 0, 58);
 
-    _btn_inc_down = make_incline_btn(scr, "Incline -", INC_DN_Y, -1);
+    // ---- Speed buttons: Fast+/Slow- side by side ----------------------------
+    _btn_fast = make_speed_btn(scr, "Fast +", BTN_X_L, SPEED_BTN_Y,  1);
+    _btn_slow = make_speed_btn(scr, "Slow -", BTN_X_R, SPEED_BTN_Y, -1);
+
+    // ---- Incline buttons: Incline+/Incline- side by side --------------------
+    _btn_inc_up   = make_incline_btn(scr, "Incline +", BTN_X_L, INC_BTN_Y,  1);
+    _btn_inc_down = make_incline_btn(scr, "Incline -", BTN_X_R, INC_BTN_Y, -1);
 
     // ---- Bottom strip: start/stop -------------------------------------------
     _btn_stop = lv_btn_create(scr);
-    lv_obj_set_size(_btn_stop, 280, STOP_H);
-    lv_obj_set_pos(_btn_stop, 20, BOTTOM_Y);
+    lv_obj_set_size(_btn_stop, STOP_W, STOP_H);
+    lv_obj_set_pos(_btn_stop, STOP_X, STOP_Y);
     lv_obj_set_style_bg_color(_btn_stop, lv_color_hex(0x226622), 0);
     lv_obj_set_style_bg_color(_btn_stop, lv_color_hex(0x154415), LV_STATE_PRESSED);
     lv_obj_set_style_radius(_btn_stop, 6, 0);
@@ -347,6 +503,10 @@ void ui_init() {
 
 void ui_update(float speed_mph, int incline, uint32_t elapsed_sec,
                bool safety, bool running) {
+    // Skip widget updates when the marker screen is active.
+#ifdef TEST_MARKERS
+    if (TEST_MARKERS) return;
+#endif
     if (safety) {
         lv_obj_add_flag(_arc,          LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(_lbl_speed,    LV_OBJ_FLAG_HIDDEN);
@@ -397,7 +557,7 @@ void ui_update(float speed_mph, int incline, uint32_t elapsed_sec,
     snprintf(buf, sizeof(buf), "%.1f", speed_mph);
     lv_label_set_text(_lbl_speed, buf);
 
-    snprintf(buf, sizeof(buf), "%d", incline);
+    snprintf(buf, sizeof(buf), "Incline %d", incline);
     lv_label_set_text(_lbl_incline, buf);
 
     snprintf(buf, sizeof(buf), "%02u:%02u",

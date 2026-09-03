@@ -1,0 +1,19 @@
+[Unit]
+Description=Tradmill Pi Zero W — treadmill motor controller
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/pi/Tradmill/boards/rpi-zero
+ExecStart=/usr/bin/python3 main.py
+Restart=always
+RestartSec=2
+WatchdogSec=5
+ExecStopPost=/bin/sh -c 'echo 0 > /sys/class/pwm/pwmchip0/pwm1/duty_cycle 2>/dev/null || true'
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tradmill
+
+[Install]
+WantedBy=multi-user.target
